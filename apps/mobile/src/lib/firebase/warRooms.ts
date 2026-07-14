@@ -9,6 +9,7 @@ import type {
   OpenQuizQuestionRoomCommand,
   ScoreQuizQuestionRoomCommand,
   SelectCharacterRoomCommand,
+  SetLobbyReadyRoomCommand,
   SetArenaReadyRoomCommand,
   StartBattleSetupRoomCommand,
   StartBattleRoomCommand,
@@ -48,6 +49,7 @@ type WarRoomCommandInput =
   | Omit<OpenQuizQuestionRoomCommand, CommandInputKeys>
   | Omit<ScoreQuizQuestionRoomCommand, CommandInputKeys>
   | Omit<SelectCharacterRoomCommand, CommandInputKeys>
+  | Omit<SetLobbyReadyRoomCommand, CommandInputKeys>
   | Omit<SetArenaReadyRoomCommand, CommandInputKeys>
   | Omit<StartBattleSetupRoomCommand, CommandInputKeys>
   | Omit<StartBattleRoomCommand, CommandInputKeys>
@@ -183,7 +185,7 @@ export async function joinWarRoom(roomCode: string, nickname: string): Promise<W
     nickname: nickname.trim() || "Participant",
     position: null,
     quizCompleted: false,
-    readiness: "customizing",
+    readiness: "lobby",
     selection: null,
     totalQuestions: null,
     updatedAt: nowMs,
@@ -248,6 +250,10 @@ async function submitCommand(
 
 export function selectCharacter(session: WarRoomSession, room: WarRoomState, selection: CharacterSelection) {
   return submitCommand(session, room, { selection, type: "select_character" });
+}
+
+export function setLobbyReady(session: WarRoomSession, room: WarRoomState, ready: boolean) {
+  return submitCommand(session, room, { ready, type: "set_lobby_ready" });
 }
 
 export function lockPosition(session: WarRoomSession, room: WarRoomState, position: ArenaPosition) {
@@ -344,6 +350,16 @@ export interface QuizAnswerRecord {
   optionId: string;
   participantId: string;
   submittedAt: number;
+}
+
+export async function getOwnQuizAnswer(
+  session: WarRoomSession,
+  roomId: string,
+  questionId: string,
+): Promise<QuizAnswerRecord | null> {
+  if (session.role !== "participant") return null;
+  const snapshot = await get(ref(firebaseDatabase(), `quizAnswers/${roomId}/${questionId}/${session.uid}`));
+  return snapshot.exists() ? snapshot.val() as QuizAnswerRecord : null;
 }
 
 export async function submitQuizAnswer(

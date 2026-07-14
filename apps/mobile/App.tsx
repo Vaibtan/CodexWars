@@ -13,6 +13,7 @@ import { ArCharacterTestScreen } from "./src/screens/ArCharacterTestScreen";
 import { HomeScreen } from "./src/screens/HomeScreen";
 import { OrganizerDashboardScreen } from "./src/screens/OrganizerDashboardScreen";
 import { ParticipantBattleScreen } from "./src/screens/ParticipantBattleScreen";
+import { ParticipantArenaWaitingScreen } from "./src/screens/ParticipantArenaWaitingScreen";
 import { ParticipantPlacementScreen } from "./src/screens/ParticipantPlacementScreen";
 import { ParticipantQuizResultsScreen } from "./src/screens/ParticipantQuizResultsScreen";
 import { ParticipantQuizScreen } from "./src/screens/ParticipantQuizScreen";
@@ -27,6 +28,7 @@ type AppScreen =
   | "participant-quiz-results"
   | "ar-demo"
   | "character-customization"
+  | "participant-arena-waiting"
   | "participant-placement"
   | "participant-battle"
   | "organizer-results"
@@ -64,6 +66,9 @@ export default function App() {
     }
     if (session.role === "organizer" && warRoom.room.phase === "arena-setup" && screen === "organizer-dashboard") {
       setScreen("ar-demo");
+    }
+    if (session.role === "participant" && warRoom.room.phase === "positioning" && screen === "participant-arena-waiting") {
+      setScreen("participant-placement");
     }
     if (session.role === "participant" && warRoom.room.phase === "battle" && screen === "participant-placement") {
       setScreen("participant-battle");
@@ -144,12 +149,21 @@ export default function App() {
           onBack={() => setScreen("quiz-waiting")}
           onNext={(nextSelection) => {
             void selectCharacter(session, warRoom.room!, nextSelection);
-            setScreen("participant-placement");
+            setScreen(warRoom.room?.phase === "positioning" ? "participant-placement" : "participant-arena-waiting");
           }}
           onSelectionChange={(nextSelection) => {
             setSelection(nextSelection);
             void selectCharacter(session, warRoom.room!, nextSelection).catch((error: unknown) => setConnectionError(error instanceof Error ? error.message : String(error)));
           }}
+          selection={selection}
+        />
+      )}
+      {screen === "participant-arena-waiting" && warRoom.room && (
+        <ParticipantArenaWaitingScreen
+          connected={warRoom.connected}
+          onChangeCharacter={() => setScreen("character-customization")}
+          onLeave={leaveRoom}
+          room={warRoom.room}
           selection={selection}
         />
       )}

@@ -8,6 +8,7 @@ export type {
   OpenQuizQuestionRoomCommand,
   ScoreQuizQuestionRoomCommand,
   SelectCharacterRoomCommand,
+  SetLobbyReadyRoomCommand,
   SetArenaReadyRoomCommand,
   StartBattleSetupRoomCommand,
   StartBattleRoomCommand,

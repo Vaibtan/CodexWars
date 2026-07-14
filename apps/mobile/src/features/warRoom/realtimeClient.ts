@@ -10,6 +10,7 @@ import {
   openQuizQuestion,
   scoreQuizQuestion,
   selectCharacter,
+  setLobbyReady,
   setArenaReady,
   startBattle,
   startBattleSetup,
@@ -23,6 +24,7 @@ import {
 import type { WarRoomSession } from "./types";
 
 export type WarRoomIntent =
+  | { ready: boolean; type: "set_lobby_ready" }
   | { type: "start_quiz" }
   | { endsAt: number; questionId: string; questionIndex: number; type: "open_quiz_question" }
   | { optionId: string; type: "submit_quiz_answer" }
@@ -90,6 +92,7 @@ class FirebaseWarRoomClient implements WarRoomRealtimeClient {
     const room = this.snapshot.room;
     if (!room) throw new Error("War Room state has not loaded yet.");
     switch (intent.type) {
+      case "set_lobby_ready": return this.resolve(setLobbyReady(this.session, room, intent.ready));
       case "start_quiz": return this.resolve(startQuiz(this.session, room));
       case "open_quiz_question": return this.resolve(openQuizQuestion(this.session, room, intent.questionId, intent.questionIndex, intent.endsAt));
       case "submit_quiz_answer": return submitQuizAnswer(this.session, room, intent.optionId);

@@ -49,6 +49,11 @@ export interface AnnounceJoinRoomCommand extends WarRoomCommandBase {
   type: "announce_join";
 }
 
+export interface SetLobbyReadyRoomCommand extends WarRoomCommandBase {
+  ready: boolean;
+  type: "set_lobby_ready";
+}
+
 export interface LockPositionRoomCommand extends WarRoomCommandBase {
   position: ArenaPosition;
   type: "lock_position";
@@ -114,6 +119,7 @@ export type WarRoomCommand =
   | OpenQuizQuestionRoomCommand
   | ScoreQuizQuestionRoomCommand
   | SelectCharacterRoomCommand
+  | SetLobbyReadyRoomCommand
   | SetArenaReadyRoomCommand
   | StartBattleSetupRoomCommand
   | StartBattleRoomCommand
@@ -129,6 +135,7 @@ export type WarRoomEventType =
   | "character_selected"
   | "command_rejected"
   | "participant_joined"
+  | "participant_ready_changed"
   | "position_locked"
   | "quiz_completed"
   | "quiz_question_opened"

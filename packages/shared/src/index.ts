@@ -25,7 +25,7 @@ export interface ArenaPosition {
   z: number;
 }
 
-export type ParticipantReadiness = "customizing" | "positioning" | "waiting";
+export type ParticipantReadiness = "lobby" | "quiz-ready" | "customizing" | "positioning" | "waiting";
 
 export interface WaitingParticipant {
   id: string;

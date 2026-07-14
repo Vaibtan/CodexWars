@@ -34,7 +34,7 @@
         },
         "commands": {
           "$commandId": {
-            ".write": "auth != null && !data.exists() && newData.child('id').val() === $commandId && newData.child('actorId').val() === auth.uid && newData.child('status').val() === 'pending' && ((root.child('warRooms').child($roomId).child('organizerId').val() === auth.uid) || (root.child('warRooms').child($roomId).child('members').child(auth.uid).exists() && (newData.child('type').val() === 'announce_join' || newData.child('type').val() === 'select_character' || newData.child('type').val() === 'lock_position' || newData.child('type').val() === 'attack')))",
+            ".write": "auth != null && !data.exists() && newData.child('id').val() === $commandId && newData.child('actorId').val() === auth.uid && newData.child('status').val() === 'pending' && ((root.child('warRooms').child($roomId).child('organizerId').val() === auth.uid) || (root.child('warRooms').child($roomId).child('members').child(auth.uid).exists() && (newData.child('type').val() === 'announce_join' || newData.child('type').val() === 'set_lobby_ready' || newData.child('type').val() === 'select_character' || newData.child('type').val() === 'lock_position' || newData.child('type').val() === 'attack')))",
             ".validate": "newData.hasChildren(['id', 'actorId', 'type', 'status', 'roundId', 'createdAt']) && newData.child('id').val() === $commandId && newData.child('roundId').val() === root.child('warRooms').child($roomId).child('roundId').val() && newData.child('createdAt').isNumber() && (newData.child('status').val() === 'pending' || newData.child('status').val() === 'resolved' || newData.child('status').val() === 'rejected')"
           }
         },

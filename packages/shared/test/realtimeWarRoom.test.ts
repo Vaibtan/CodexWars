@@ -80,7 +80,7 @@ describe("resolveWarRoomCommand", () => {
         correctAnswers: null,
         position: null,
         quizCompleted: false,
-        readiness: "customizing" as const,
+        readiness: "quiz-ready" as const,
         selection: null,
         totalQuestions: null,
       }])),
@@ -122,6 +122,38 @@ describe("resolveWarRoomCommand", () => {
     expect(state.members.alpha).toMatchObject({ correctAnswers: 7, quizCompleted: true, totalQuestions: 10 });
     expect(state.members.beta).toMatchObject({ correctAnswers: 3, quizCompleted: true, totalQuestions: 10 });
     expect(state.stats.alpha.maxShield).toBeGreaterThan(state.stats.beta.maxShield);
+  });
+
+  it("requires every connected participant to mark ready before the organizer starts the quiz", () => {
+    const ready = pending<Extract<WarRoomCommand, { type: "set_lobby_ready" }>>({
+      actorId: "alpha",
+      id: "alpha-ready",
+      ready: true,
+      type: "set_lobby_ready",
+    });
+    let state = roomWith(ready, "lobby");
+    state = {
+      ...state,
+      members: {
+        ...state.members,
+        alpha: { ...state.members.alpha, readiness: "lobby" },
+        beta: { ...state.members.beta, readiness: "lobby" },
+      },
+      quiz: { ...state.quiz, completedQuestionCount: 0, status: "waiting" },
+    };
+    state = resolveWarRoomCommand(state, ready.id, now).room;
+    expect(state.members.alpha.readiness).toBe("quiz-ready");
+    expect(Object.values(state.events).at(-1)?.type).toBe("participant_ready_changed");
+
+    const start = pending<Extract<WarRoomCommand, { type: "start_quiz" }>>({
+      actorId: "organizer",
+      id: "start-before-beta-ready",
+      questionCount: 10,
+      type: "start_quiz",
+    });
+    const rejected = resolveWarRoomCommand({ ...state, commands: { ...state.commands, [start.id]: start } }, start.id, now + 1);
+    expect(rejected.status).toBe("rejected");
+    expect(rejected.room.commands[start.id].rejectionCode).toBe("PARTICIPANTS_NOT_READY");
   });
 
   it("starts only when the arena and every combat participant are ready", () => {

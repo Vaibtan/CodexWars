@@ -158,10 +158,29 @@ export function resolveWarRoomCommand(
     });
   }
 
+  if (command.type === "set_lobby_ready") {
+    if (!actor) return rejectCommand(room, command, nowMs, "ACTOR_NOT_MEMBER");
+    if (room.phase !== "lobby") return rejectCommand(room, command, nowMs, "INVALID_PHASE");
+    const readiness = command.ready ? "quiz-ready" as const : "lobby" as const;
+    const nextRoom = {
+      ...room,
+      members: { ...room.members, [actor.id]: { ...actor, readiness, updatedAt: nowMs } },
+    };
+    return resolveSimpleEvent(nextRoom, command, nowMs, {
+      actorId: actor.id,
+      message: `${actor.nickname} is ${command.ready ? "ready" : "not ready"} for the quiz`,
+      type: "participant_ready_changed",
+    });
+  }
+
   if (command.type === "start_quiz") {
     if (!isOrganizer) return rejectCommand(room, command, nowMs, "NOT_ORGANIZER");
     if (room.phase !== "lobby" || room.quiz.status !== "waiting" || command.questionCount !== 10) {
       return rejectCommand(room, command, nowMs, "INVALID_QUIZ_STATE");
+    }
+    const participants = Object.values(room.members).filter((member) => member.combatIncluded);
+    if (participants.length === 0 || participants.some((member) => !member.connected || member.readiness !== "quiz-ready")) {
+      return rejectCommand(room, command, nowMs, "PARTICIPANTS_NOT_READY");
     }
     const scores = Object.fromEntries(Object.keys(room.members).map((id) => [id, 0]));
     return resolveSimpleEvent({ ...room, phase: "quiz", quiz: { ...room.quiz, scores } }, command, nowMs, {

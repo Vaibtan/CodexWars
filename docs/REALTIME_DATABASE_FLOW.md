@@ -6,8 +6,8 @@ CodexWars uses Firestore for durable quiz templates and Realtime Database (RTDB)
 
 `lobby → quiz → quiz-results → arena-setup → positioning → battle → results`
 
-1. The organizer creates a six-digit room and waits in `lobby` while participants join with a name.
-2. The organizer starts the fixed ten-question quiz, opens each question, closes it, reads private answers, publishes correctness outcomes, and advances.
+1. The organizer creates a six-digit room and waits in `lobby` while participants join with a name and explicitly toggle `quiz-ready`. The quiz cannot start until every included participant is online and ready.
+2. The organizer starts the fixed ten-question quiz, opens each question, closes it, reads private answers, publishes correctness outcomes, and advances. Participants can submit only one answer; they see correctness and the exact battle-stat delta, but only the organizer advances the shared question index.
 3. Completing question ten derives `BattleLoadout` for every participant and moves to `quiz-results`.
 4. The organizer moves to `arena-setup`. Participants may customize while the organizer scans.
 5. Locking the arena moves to `positioning`; participants lock one marker-relative `(x,z)` position.
@@ -53,7 +53,7 @@ Quiz content and answer keys live in Firestore, not the public War Room. A parti
 |---|---|---|
 | Own presence | Connect/disconnect only | May reconcile as part of room transaction |
 | Private quiz answer | Create once while open | Read after closing question |
-| Commands | Join, character, position, attack | All orchestration commands |
+| Commands | Join, lobby readiness, character, position, attack | All orchestration commands |
 | Phase, quiz score, stats, HP, results | No direct write | Transactional write |
 | Events and command status | No direct write | Transactional append/resolve |
 
@@ -77,6 +77,8 @@ await client.send({ type: "open_quiz_question", questionId, questionIndex, endsA
 - Room commands are idempotent: only `pending` commands resolve, and retries return the existing resolution.
 - Every authoritative mutation increments `revision`; every action event increments `eventSequence`.
 - Exactly ten scored questions are required before battle stats exist.
+- Quiz progression is organizer-owned; participant answer writes never move the current question.
+- Quiz start requires at least one participant and every included participant to be connected with `readiness = quiz-ready`.
 - Character choice is cosmetic and never influences targeting or stats.
 - Locked positions must remain inside the arena and at least 1.5 m apart.
 - A client-predicted target never decides a hit; only normalized direction and authoritative positions do.
