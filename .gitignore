@@ -1,5 +1,9 @@
 node_modules/
 dist/
+.expo/
+apps/mobile/.expo/
+apps/mobile/ios/
+apps/mobile/android/
 .env
 .env.*
 !.env.example
