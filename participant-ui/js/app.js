@@ -1,0 +1,2 @@
+/* Tiny in-place router for the framework-free prototype. Hash changes never reload the page. */
+window.ParticipantApp={go(route){if(route.endsWith('.html')){document.body.classList.add('page-leaving');setTimeout(()=>{location.href=route},260);return}const next=`#${route}`;if(location.hash===next)this.render();else location.hash=next},render(){document.dispatchEvent(new Event('participant:route'))}};

@@ -1,0 +1,3 @@
+/* Future integration boundary: Firebase presence, ARCore/ARKit setup, camera permission and countdown attach here. */
+document.querySelector('#selectedPower').textContent=ParticipantApp.get('selectedPower','Lightning');
+const steps=['Synchronizing Players','Loading Arena Assets','Initializing Powers','Preparing Camera'];let step=0,progress=18;const message=document.querySelector('#loadingMessage'),status=document.querySelector('#arenaStatus'),bar=document.querySelector('#arenaProgress');function updateArena(){message.textContent=steps[step];status.textContent=steps[step];progress=Math.min(92,progress+18);bar.style.width=`${progress}%`;step=(step+1)%steps.length}updateArena();setInterval(updateArena,1800);

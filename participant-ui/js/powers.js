@@ -1,0 +1,2 @@
+/* A selected ability is stored independently of this screen for the battle handoff. */
+const powerOptions=document.querySelectorAll('.power-option'),startBattle=document.querySelector('#startBattle');powerOptions.forEach(option=>option.addEventListener('click',()=>{powerOptions.forEach(item=>item.classList.remove('selected'));option.classList.add('selected');ParticipantApp.set('selectedPower',option.dataset.power);startBattle.disabled=false}));startBattle.addEventListener('click',()=>ParticipantApp.go('battle.html'));

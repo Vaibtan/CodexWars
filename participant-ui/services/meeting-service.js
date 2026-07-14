@@ -1,0 +1,2 @@
+/* Temporary local meeting store. Firebase validation and listeners will replace this later. */
+(function(){const MEETING_KEY='codexwars:meeting';window.MeetingService={join(code){const meeting={code:code.trim().toUpperCase()};sessionStorage.setItem(MEETING_KEY,JSON.stringify(meeting));return meeting},current(){try{return JSON.parse(sessionStorage.getItem(MEETING_KEY)||'null')}catch{return null}}}})();
