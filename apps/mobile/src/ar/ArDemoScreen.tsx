@@ -1,18 +1,20 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { ViroARSceneNavigator } from "@reactvision/react-viro";
+import type { WarRoomState } from "@codexwars/shared";
 import { colors } from "../components/theme";
 import { getCharacter, getCharacterColor } from "../features/characters/characterCatalog";
-import type { WaitingParticipant } from "../features/characters/types";
-import { BattleScene } from "./scenes/BattleScene";
+import type { WarRoomSession } from "../features/warRoom/types";
+import { endBattle, setArenaReady, startBattle } from "../lib/firebase/warRooms";
 import { FloorScanScene } from "./scenes/FloorScanScene";
 import type { ArFlowPhase, ArSceneBridge, ArTrackingState } from "./types";
 
 type ArDemoScreenProps = {
   onBattleComplete: () => void;
   onExit: () => void;
-  waitingParticipant?: WaitingParticipant | null;
+  room: WarRoomState;
+  session: WarRoomSession;
 };
 
 const trackingCopy: Record<ArTrackingState, string> = {
@@ -22,10 +24,13 @@ const trackingCopy: Record<ArTrackingState, string> = {
   unavailable: "Tracking unavailable",
 };
 
-export function ArDemoScreen({ onBattleComplete, onExit, waitingParticipant }: ArDemoScreenProps) {
+export function ArDemoScreen({ onBattleComplete, onExit, room, session }: ArDemoScreenProps) {
   const [phase, setPhase] = useState<ArFlowPhase>("floor-scan");
   const [floorFound, setFloorFound] = useState(false);
   const [trackingState, setTrackingState] = useState<ArTrackingState>("initializing");
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const participants = Object.values(room.members);
+  const readyParticipants = participants.filter((participant) => participant.readiness === "waiting");
 
   const sceneBridge = useMemo<ArSceneBridge>(
     () => ({
@@ -35,33 +40,44 @@ export function ArDemoScreen({ onBattleComplete, onExit, waitingParticipant }: A
     [],
   );
 
-  const openOrganizerLobby = () => {
+  useEffect(() => {
+    if (room.phase === "battle") setPhase("battle");
+    if (room.phase === "results") onBattleComplete();
+  }, [onBattleComplete, room.phase]);
+
+  const openOrganizerLobby = async () => {
     if (!floorFound) {
       return;
     }
-    setPhase("organizer-lobby");
+    setSyncError(null);
+    try {
+      await setArenaReady(session, room);
+      setPhase("organizer-lobby");
+    } catch (error) {
+      setSyncError(error instanceof Error ? error.message : String(error));
+    }
   };
 
-  const enterBattle = () => {
-    if (!waitingParticipant) {
+  const enterBattle = async () => {
+    if (readyParticipants.length < 2) {
       return;
     }
-    setTrackingState("initializing");
-    setPhase("battle");
+    setSyncError(null);
+    try {
+      await startBattle(session, room);
+    } catch (error) {
+      setSyncError(error instanceof Error ? error.message : String(error));
+    }
   };
 
   return (
     <View style={styles.screen}>
-      {phase !== "organizer-lobby" ? (
-        <ViroARSceneNavigator
-          initialScene={{ scene: phase === "battle" ? BattleScene : FloorScanScene }}
-          key={phase}
-          style={styles.arView}
-          viroAppProps={sceneBridge}
-        />
-      ) : (
-        <View style={styles.lobbyBackdrop} />
-      )}
+      <ViroARSceneNavigator
+        initialScene={{ scene: FloorScanScene }}
+        style={styles.arView}
+        viroAppProps={sceneBridge}
+      />
+      {phase === "organizer-lobby" ? <View style={styles.lobbyBackdrop} /> : null}
 
       <SafeAreaView edges={["top", "bottom"]} pointerEvents="box-none" style={styles.overlay}>
         <View pointerEvents="box-none" style={styles.topBar}>
@@ -88,7 +104,7 @@ export function ArDemoScreen({ onBattleComplete, onExit, waitingParticipant }: A
               ]}
             />
             <Text numberOfLines={1} style={styles.statusText}>
-              {phase === "organizer-lobby" ? "Camera paused in lobby" : trackingCopy[trackingState]}
+              {phase === "organizer-lobby" ? "Arena locked · realtime lobby" : trackingCopy[trackingState]}
             </Text>
           </View>
           <View style={styles.phasePill}>
@@ -119,7 +135,7 @@ export function ArDemoScreen({ onBattleComplete, onExit, waitingParticipant }: A
               <Pressable
                 accessibilityRole="button"
                 disabled={!floorFound}
-                onPress={openOrganizerLobby}
+                onPress={() => void openOrganizerLobby()}
                 style={({ pressed }) => [
                   styles.continueButton,
                   !floorFound && styles.continueButtonDisabled,
@@ -141,52 +157,48 @@ export function ArDemoScreen({ onBattleComplete, onExit, waitingParticipant }: A
                   <Text style={styles.panelTitle}>Players waiting</Text>
                 </View>
                 <View style={styles.readyCount}>
-                  <Text style={styles.readyCountText}>{waitingParticipant ? "3 / 3" : "2 / 3"}</Text>
+                  <Text style={styles.readyCountText}>{readyParticipants.length} / {participants.length}</Text>
                 </View>
               </View>
               <Text style={styles.panelBody}>
                 Start remains locked until every combat participant has localized and fixed a safe position.
               </Text>
 
-              {[
-                { name: "Mira", detail: "Aegis · position locked", ready: true },
-                { name: "Theo", detail: "Rune · position locked", ready: true },
-                waitingParticipant
-                  ? {
-                      name: waitingParticipant.nickname,
-                      detail: `${getCharacter(waitingParticipant.selection.characterId).displayName} · ${getCharacterColor(waitingParticipant.selection.colorId).label}`,
-                      ready: true,
-                    }
-                  : { name: "Participant demo", detail: "Complete participant setup first", ready: false },
-              ].map((participant) => (
-                <View key={participant.name} style={styles.lobbyPlayerRow}>
-                  <View style={[styles.playerStatusDot, !participant.ready && styles.playerStatusDotPending]} />
+              {participants.map((participant) => {
+                const ready = participant.readiness === "waiting";
+                const detail = participant.selection
+                  ? `${getCharacter(participant.selection.characterId).displayName} · ${getCharacterColor(participant.selection.colorId).label}`
+                  : participant.quizCompleted ? "Choosing character" : "Quiz in progress";
+                return (
+                <View key={participant.id} style={styles.lobbyPlayerRow}>
+                  <View style={[styles.playerStatusDot, !ready && styles.playerStatusDotPending]} />
                   <View style={styles.lobbyPlayerCopy}>
-                    <Text style={styles.lobbyPlayerName}>{participant.name}</Text>
-                    <Text style={styles.lobbyPlayerDetail}>{participant.detail}</Text>
+                    <Text style={styles.lobbyPlayerName}>{participant.nickname}</Text>
+                    <Text style={styles.lobbyPlayerDetail}>{detail}</Text>
                   </View>
-                  <Text style={[styles.lobbyPlayerState, !participant.ready && styles.lobbyPlayerStatePending]}>
-                    {participant.ready ? "WAITING" : "NOT READY"}
+                  <Text style={[styles.lobbyPlayerState, !ready && styles.lobbyPlayerStatePending]}>
+                    {ready ? "WAITING" : "NOT READY"}
                   </Text>
                 </View>
-              ))}
+              )})}
 
               <Pressable
-                accessibilityHint={waitingParticipant ? "Starts the battle for all waiting players" : "Participant setup is incomplete"}
+                accessibilityHint={readyParticipants.length >= 2 ? "Starts the battle for all waiting players" : "At least two participants must be ready"}
                 accessibilityRole="button"
-                accessibilityState={{ disabled: !waitingParticipant }}
-                disabled={!waitingParticipant}
-                onPress={enterBattle}
+                accessibilityState={{ disabled: readyParticipants.length < 2 }}
+                disabled={readyParticipants.length < 2}
+                onPress={() => void enterBattle()}
                 style={({ pressed }) => [
                   styles.continueButton,
-                  !waitingParticipant && styles.continueButtonDisabled,
-                  pressed && waitingParticipant && styles.controlPressed,
+                  readyParticipants.length < 2 && styles.continueButtonDisabled,
+                  pressed && readyParticipants.length >= 2 && styles.controlPressed,
                 ]}
               >
                 <Text style={styles.continueButtonText}>
-                  {waitingParticipant ? "Start battle" : "Waiting for participant"}
+                  {readyParticipants.length >= 2 ? "Start battle" : `Waiting for players · ${readyParticipants.length}/2`}
                 </Text>
               </Pressable>
+              {syncError ? <Text accessibilityLiveRegion="assertive" style={styles.syncError}>{syncError}</Text> : null}
             </View>
           </View>
         ) : (
@@ -195,21 +207,23 @@ export function ArDemoScreen({ onBattleComplete, onExit, waitingParticipant }: A
               <View style={styles.organizerBattleCopy}>
                 <Text style={styles.healthLabel}>ORGANIZER VIEW</Text>
                 <Text style={styles.organizerBattleTitle}>Battle in progress</Text>
-                <Text style={styles.organizerBattleDetail}>3 players active · demo timer 00:60</Text>
+                <Text style={styles.organizerBattleDetail}>{participants.length} players synchronized · room {room.code}</Text>
               </View>
               <Pressable
                 accessibilityRole="button"
-                onPress={onBattleComplete}
+                onPress={() => void endBattle(session, room).catch((error: unknown) => setSyncError(error instanceof Error ? error.message : String(error)))}
                 style={({ pressed }) => [styles.endBattleButton, pressed && styles.controlPressed]}
               >
                 <Text style={styles.endBattleButtonText}>End battle</Text>
               </Pressable>
             </View>
             <View style={styles.organizerRoster}>
-              <Text style={styles.organizerRosterTitle}>Live standings preview</Text>
-              <Text style={styles.organizerRosterRow}>Mira · 72 HP</Text>
-              <Text style={styles.organizerRosterRow}>You · 41 HP</Text>
-              <Text style={styles.organizerRosterRow}>Theo · eliminated</Text>
+              <Text style={styles.organizerRosterTitle}>Live Battle Snapshot</Text>
+              {participants.map((participant) => (
+                <Text key={participant.id} style={styles.organizerRosterRow}>
+                  {participant.nickname} · {room.stats[participant.id]?.eliminated ? "eliminated" : `${room.stats[participant.id]?.hp ?? 0} HP`}
+                </Text>
+              ))}
             </View>
           </View>
         )}
@@ -221,7 +235,8 @@ export function ArDemoScreen({ onBattleComplete, onExit, waitingParticipant }: A
 const styles = StyleSheet.create({
   screen: { backgroundColor: colors.background, flex: 1 },
   arView: { flex: 1 },
-  lobbyBackdrop: { backgroundColor: colors.background, flex: 1 },
+  lobbyBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: colors.background },
+  syncError: { color: colors.danger, fontSize: 12, marginTop: 10, textAlign: "center" },
   overlay: { ...StyleSheet.absoluteFillObject, justifyContent: "space-between" },
   topBar: {
     alignItems: "center",

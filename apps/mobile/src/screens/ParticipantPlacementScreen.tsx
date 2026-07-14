@@ -1,26 +1,25 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { deriveBattleLoadout } from "@codexwars/shared";
+import { deriveBattleLoadout, type WarRoomState } from "@codexwars/shared";
 import { ParticipantPlacementArView } from "../ar/ParticipantPlacementArView";
 import { BattleStatsPanel } from "../components/BattleStatsPanel";
 import { CharacterPreview } from "../components/CharacterPreview";
 import { colors } from "../components/theme";
 import type { ArSceneBridge, ArTrackingState } from "../ar/types";
 import { getCharacter, getCharacterColor } from "../features/characters/characterCatalog";
-import type {
-  ArenaPosition,
-  CharacterSelection,
-  WaitingParticipant,
-} from "../features/characters/types";
+import type { ArenaPosition, CharacterSelection } from "../features/characters/types";
+import type { WarRoomSession } from "../features/warRoom/types";
+import { lockPosition } from "../lib/firebase/warRooms";
 
 type ParticipantPlacementScreenProps = {
   correctAnswers: number;
   onBack: () => void;
-  onReady: (participant: WaitingParticipant) => void;
   onReturnHome: () => void;
   onStartBattle: () => void;
+  room: WarRoomState;
   selection: CharacterSelection;
+  session: WarRoomSession;
 };
 
 const trackingCopy: Record<ArTrackingState, string> = {
@@ -33,20 +32,20 @@ const trackingCopy: Record<ArTrackingState, string> = {
 export function ParticipantPlacementScreen({
   correctAnswers,
   onBack,
-  onReady,
   onReturnHome,
   onStartBattle,
+  room,
   selection,
+  session,
 }: ParticipantPlacementScreenProps) {
   const [tracking, setTracking] = useState<ArTrackingState>("initializing");
   const [position, setPosition] = useState<ArenaPosition | null>(null);
   const [waiting, setWaiting] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const character = getCharacter(selection.characterId);
   const characterColor = getCharacterColor(selection.colorId);
-  const battleLoadout = useMemo(
-    () => deriveBattleLoadout({ correctAnswers, totalQuestions: 10 }),
-    [correctAnswers],
-  );
+  const battleLoadout = room.stats[session.uid] ?? deriveBattleLoadout({ correctAnswers, totalQuestions: 10 });
+  const syncedMember = room.members[session.uid];
 
   const sceneBridge = useMemo<ArSceneBridge>(
     () => ({
@@ -57,23 +56,31 @@ export function ParticipantPlacementScreen({
     [selection],
   );
 
-  const joinBattle = () => {
+  useEffect(() => {
+    if (room.phase === "battle") onStartBattle();
+  }, [onStartBattle, room.phase]);
+
+  useEffect(() => {
+    if (syncedMember?.readiness === "waiting") setWaiting(true);
+  }, [syncedMember?.readiness]);
+
+  const joinBattle = async () => {
     if (!position || tracking !== "normal") {
       return;
     }
-    onReady({
-      id: "local-participant",
-      nickname: "You",
-      position,
-      selection,
-      status: "waiting",
-    });
-    setWaiting(true);
+    setSyncError(null);
+    try {
+      await lockPosition(session, room, position);
+    } catch (error) {
+      setSyncError(error instanceof Error ? error.message : String(error));
+    }
   };
 
   if (waiting) {
     return (
-      <SafeAreaView edges={["top", "bottom"]} style={styles.waitingScreen}>
+      <View style={styles.screen}>
+        <ParticipantPlacementArView bridge={sceneBridge} selection={selection} />
+        <SafeAreaView edges={["top", "bottom"]} style={[styles.waitingScreen, styles.waitingOverlay]}>
         <ScrollView contentContainerStyle={styles.waitingContent} showsVerticalScrollIndicator={false}>
           <View style={styles.waitingTop}>
             <View style={styles.readyPill}>
@@ -102,14 +109,7 @@ export function ParticipantPlacementScreen({
 
           <View style={styles.waitingFooter}>
             <Text accessibilityLiveRegion="polite" style={styles.organizerStatus}>Waiting for organizer…</Text>
-            <Pressable
-              accessibilityHint="Opens the participant battle preview"
-              accessibilityRole="button"
-              onPress={onStartBattle}
-              style={({ pressed }) => [styles.startButton, pressed && styles.pressed]}
-            >
-              <Text style={styles.startButtonText}>Organizer started · enter battle</Text>
-            </Pressable>
+            <Text style={styles.waitingHint}>Battle opens automatically when the organizer starts.</Text>
             <Pressable
               accessibilityRole="button"
               onPress={onReturnHome}
@@ -119,11 +119,17 @@ export function ParticipantPlacementScreen({
             </Pressable>
           </View>
         </ScrollView>
-      </SafeAreaView>
+        </SafeAreaView>
+      </View>
     );
   }
 
-  const canJoin = Boolean(position) && tracking === "normal";
+  const selectionSynced = syncedMember?.selection?.characterId === selection.characterId
+    && syncedMember.selection.colorId === selection.colorId;
+  const canJoin = Boolean(position)
+    && tracking === "normal"
+    && selectionSynced
+    && room.arena.status === "ready";
 
   return (
     <View style={styles.screen}>
@@ -185,6 +191,7 @@ export function ParticipantPlacementScreen({
                 {position ? "Lock position and join battle" : "Tap floor to choose position"}
               </Text>
             </Pressable>
+            {syncError ? <Text accessibilityLiveRegion="assertive" style={styles.syncError}>{syncError}</Text> : null}
           </View>
         </View>
       </SafeAreaView>
@@ -220,6 +227,7 @@ const styles = StyleSheet.create({
   joinText: { color: colors.accentInk, fontSize: 16, fontWeight: "900", textAlign: "center" },
   joinTextDisabled: { color: colors.inkMuted },
   waitingScreen: { backgroundColor: colors.background, flex: 1 },
+  waitingOverlay: { ...StyleSheet.absoluteFillObject },
   waitingContent: { gap: 20, paddingBottom: 12, paddingHorizontal: 22 },
   waitingTop: { paddingTop: 38 },
   readyPill: { alignItems: "center", alignSelf: "flex-start", backgroundColor: "rgba(108, 229, 168, 0.13)", borderRadius: 999, flexDirection: "row", gap: 8, minHeight: 38, paddingHorizontal: 13 },
@@ -236,6 +244,8 @@ const styles = StyleSheet.create({
   positionValue: { color: colors.ink, fontSize: 15, fontWeight: "800", marginTop: 5 },
   waitingFooter: { paddingBottom: 12 },
   organizerStatus: { color: colors.accent, fontSize: 15, fontWeight: "800", marginBottom: 12, textAlign: "center" },
+  waitingHint: { color: colors.inkMuted, fontSize: 12, lineHeight: 18, marginBottom: 12, textAlign: "center" },
+  syncError: { color: colors.danger, fontSize: 12, marginTop: 8, textAlign: "center" },
   secondaryButton: { alignItems: "center", borderColor: colors.outline, borderRadius: 14, borderWidth: 1, justifyContent: "center", minHeight: 54 },
   startButton: { alignItems: "center", backgroundColor: colors.accent, borderRadius: 14, justifyContent: "center", marginBottom: 10, minHeight: 56, paddingHorizontal: 16 },
   startButtonText: { color: colors.accentInk, fontSize: 16, fontWeight: "900", textAlign: "center" },

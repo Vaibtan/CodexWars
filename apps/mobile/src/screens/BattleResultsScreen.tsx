@@ -1,5 +1,6 @@
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import type { WarRoomState } from "@codexwars/shared";
 import { CharacterPreview } from "../components/CharacterPreview";
 import { colors } from "../components/theme";
 import type { CharacterSelection } from "../features/characters/types";
@@ -8,6 +9,7 @@ type BattleResultsScreenProps = {
   onDone: () => void;
   onRunAnotherRound?: () => void;
   role: "organizer" | "participant";
+  room?: WarRoomState | null;
   selection?: CharacterSelection;
 };
 
@@ -17,14 +19,25 @@ const standings = [
   { hp: 0, name: "Theo", place: 3 },
 ];
 
-export function BattleResultsScreen({ onDone, onRunAnotherRound, role, selection }: BattleResultsScreenProps) {
+export function BattleResultsScreen({ onDone, onRunAnotherRound, role, room, selection }: BattleResultsScreenProps) {
+  const syncedStandings = room
+    ? room.results
+      ? Object.values(room.results.standings)
+        .sort((a, b) => a.rank - b.rank)
+        .map((standing) => ({ hp: standing.hp, name: standing.nickname, place: standing.rank }))
+      : Object.values(room.members)
+        .map((member) => ({ hp: room.stats[member.id]?.hp ?? 0, name: member.nickname }))
+        .sort((a, b) => b.hp - a.hp)
+        .map((participant, index) => ({ ...participant, place: index + 1 }))
+    : standings;
+  const winner = syncedStandings[0]?.name ?? "No winner";
   return (
     <SafeAreaView edges={["top", "bottom"]} style={styles.screen}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.resultMark}><Text style={styles.resultMarkText}>✦</Text></View>
         <Text accessibilityRole="header" style={styles.title}>Battle complete</Text>
-        <Text style={styles.subtitle}>{role === "organizer" ? "Mira wins the arena" : "You placed second"}</Text>
-        <Text style={styles.detail}>Final standings are frozen. The server will provide these results when multiplayer authority is connected.</Text>
+        <Text style={styles.subtitle}>{role === "organizer" ? `${winner} wins the arena` : `Winner · ${winner}`}</Text>
+        <Text style={styles.detail}>Final standings are frozen from the authoritative Firebase Battle Snapshot. The complete action history remains in Battle Events.</Text>
 
         {selection ? (
           <View style={styles.characterWrap}>
@@ -34,7 +47,7 @@ export function BattleResultsScreen({ onDone, onRunAnotherRound, role, selection
 
         <View style={styles.standings}>
           <Text style={styles.standingsTitle}>Final standings</Text>
-          {standings.map((player) => (
+          {syncedStandings.map((player) => (
             <View key={player.name} style={styles.playerRow}>
               <Text style={styles.place}>{player.place}</Text>
               <Text style={styles.playerName}>{player.name}</Text>

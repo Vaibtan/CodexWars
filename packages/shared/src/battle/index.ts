@@ -3,7 +3,13 @@ export {
   deriveBattleLoadout,
   InvalidQuizPerformanceError,
 } from "./progression.js";
-export { getWeaponReadiness, resolveAttack } from "./combat.js";
+export { consumeWeaponUse, getWeaponReadiness, resolveAttack } from "./combat.js";
+export {
+  findNearestAimTarget,
+  normalizeAimDirection,
+  PLAYER_HIT_RADIUS_M,
+  WEAPON_GEOMETRY,
+} from "./geometry.js";
 export type {
   AppliedAttack,
   AttackRejectionCode,
@@ -19,4 +25,6 @@ export type {
   WeaponId,
   WeaponReadiness,
   WeaponStats,
+  WeaponUseResult,
 } from "./types.js";
+export type { AimCandidate, AimHit } from "./geometry.js";

@@ -5,7 +5,7 @@ CodexWars turns a synchronous quiz into a colocated arena battle. This glossary 
 ## Session and roles
 
 **War Room**:
-The live, server-owned session that contains one organizer, its participants, one quiz run, arena setup, and one battle.
+The live, War Room-authoritative session that contains one organizer, its participants, one quiz run, arena setup, and one battle.
 _Avoid_: Game session, lobby room, quiz room
 
 **Organizer**:
@@ -43,7 +43,7 @@ A participant's finalized correct-answer count and the battle reward derived fro
 _Avoid_: Battle result, score event
 
 **Reveal**:
-The server-timed interval after a question closes when its correct option and explanation become public to the War Room.
+The organizer-timed interval after a question closes when its correct option and explanation become public to the War Room.
 _Avoid_: Answer check, grading screen
 
 ## Arena and battle
@@ -53,7 +53,7 @@ A cosmetic GLB representation and approved appearance variant selected for a par
 _Avoid_: Class, hero, loadout
 
 **Battle Stats**:
-The server-owned gameplay values for a participant, including HP, shield, weapon, charges, cooldown, and elimination state. Battle Stats are independent of Character.
+The War Room-authoritative gameplay values for a participant, including HP, shield, weapon, charges, cooldown, and elimination state. Battle Stats are independent of Character.
 _Avoid_: Character stats
 
 **Locked Position**:
@@ -65,11 +65,19 @@ A participant's discrete request to fire a weapon in a normalized two-dimensiona
 _Avoid_: Hit, projectile, shot result
 
 **Attack Resolution**:
-The server's authoritative decision for an Attack Request, including target, damage, shield, HP, and combat revision.
+The War Room's authoritative decision for an Attack Request, including target, damage, shield, HP, and combat revision.
 _Avoid_: Client hit, collision event
 
+**Battle Event**:
+An immutable, ordered record of an accepted room, readiness, attack, damage, elimination, or battle-completion change within one War Room.
+_Avoid_: Log message, client update, mutable action
+
+**Battle Snapshot**:
+The current authoritative projection of a War Room's phase, arena, participants, and Battle Stats that clients render and reconcile against.
+_Avoid_: Local game state, battle cache
+
 **Battle Result**:
-The server-owned winner, completion reason, and final standings for one battle. It remains part of the War Room and is not durably persisted in P0.
+The War Room-authoritative winner, completion reason, and final standings for one battle. It remains part of the War Room and is not durably persisted in P0.
 _Avoid_: Quiz result, match history
 
 **Standings**:

@@ -4,8 +4,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import {
   deriveBattleLoadout,
   getWeaponReadiness,
-  resolveAttack,
-  type BattleLoadout,
+  type WarRoomState,
   type WeaponId,
 } from "@codexwars/shared";
 import { AttackButton } from "../ar/AttackButton";
@@ -15,11 +14,15 @@ import { BattleStatsPanel } from "../components/BattleStatsPanel";
 import { colors } from "../components/theme";
 import { getCharacter } from "../features/characters/characterCatalog";
 import type { CharacterSelection } from "../features/characters/types";
+import type { WarRoomSession } from "../features/warRoom/types";
+import { attackParticipant } from "../lib/firebase/warRooms";
 
 type ParticipantBattleScreenProps = {
   onBattleComplete: () => void;
   correctAnswers: number;
+  room: WarRoomState;
   selection: CharacterSelection;
+  session: WarRoomSession;
 };
 
 const rejectionCopy = {
@@ -31,46 +34,54 @@ const rejectionCopy = {
   WEAPON_LOCKED: "Earn this ability in the quiz first",
 } as const;
 
-export function ParticipantBattleScreen({ correctAnswers, onBattleComplete, selection }: ParticipantBattleScreenProps) {
+export function ParticipantBattleScreen({ correctAnswers, onBattleComplete, room, selection, session }: ParticipantBattleScreenProps) {
   const [tracking, setTracking] = useState<ArTrackingState>("initializing");
   const [lastAction, setLastAction] = useState("Aim at an opponent");
-  const [battleStats, setBattleStats] = useState<BattleLoadout>(() =>
-    deriveBattleLoadout({ correctAnswers, totalQuestions: 10 }),
-  );
-  const [targetStats, setTargetStats] = useState<BattleLoadout>(() =>
-    deriveBattleLoadout({ correctAnswers: 4, totalQuestions: 10 }),
-  );
   const [clockMs, setClockMs] = useState(Date.now());
   const bridge = useMemo<ArSceneBridge>(() => ({ onTrackingChanged: setTracking }), []);
+  const battleStats = room.stats[session.uid] ?? deriveBattleLoadout({ correctAnswers, totalQuestions: 10 });
+  const target = Object.values(room.members).find(
+    (member) => member.id !== session.uid && member.combatIncluded && !room.stats[member.id]?.eliminated,
+  ) ?? null;
+  const targetStats = target ? room.stats[target.id] : null;
+  const latestEvent = Object.values(room.events).sort((a, b) => b.sequence - a.sequence)[0];
 
   useEffect(() => {
     const interval = setInterval(() => setClockMs(Date.now()), 100);
     return () => clearInterval(interval);
   }, []);
 
-  const useAttack = (weaponId: WeaponId) => {
-    const result = resolveAttack({
-      attacker: battleStats,
-      nowMs: Date.now(),
-      target: targetStats,
-      weaponId,
-    });
-    if (result.status === "rejected") {
-      setLastAction(rejectionCopy[result.code]);
+  useEffect(() => {
+    if (room.phase === "results") onBattleComplete();
+  }, [onBattleComplete, room.phase]);
+
+  useEffect(() => {
+    if (latestEvent?.message) setLastAction(latestEvent.message);
+  }, [latestEvent?.id, latestEvent?.message]);
+
+  const useAttack = async (weaponId: WeaponId) => {
+    if (!target) {
+      setLastAction("No active target");
       return;
     }
-    setBattleStats(result.attacker);
-    setTargetStats(result.target);
-    setLastAction(
-      result.damage.eliminated
-        ? `Mira eliminated · ${result.damage.amount} damage`
-        : `${weaponId === "bolt" ? "Bolt" : "Fireball"} hit Mira · ${result.damage.shieldDamage} shield + ${result.damage.hpDamage} HP`,
-    );
+    setLastAction(`${weaponId === "bolt" ? "Bolt" : "Fireball"} sent…`);
+    try {
+      const origin = room.members[session.uid]?.position;
+      if (!origin || !target.position) throw new Error("Battle positions are not available.");
+      await attackParticipant(session, room, {
+        dirX: target.position.x - origin.x,
+        dirZ: target.position.z - origin.z,
+        predictedTargetId: target.id,
+      }, weaponId);
+    } catch (error) {
+      setLastAction(error instanceof Error ? error.message : String(error));
+    }
   };
 
   const trackingLabel = tracking === "normal" ? "Tracking stable" : tracking === "limited" ? "Move slowly · tracking limited" : "Starting camera…";
   const boltReadiness = getWeaponReadiness(battleStats, "bolt", clockMs);
   const fireballReadiness = getWeaponReadiness(battleStats, "fireball", clockMs);
+  const secondsRemaining = Math.max(0, Math.ceil(((room.battleEndsAt ?? clockMs) - clockMs) / 1_000));
   const readinessDetail = (weaponId: WeaponId) => {
     const readiness = weaponId === "bolt" ? boltReadiness : fireballReadiness;
     if (readiness.ready) {
@@ -92,7 +103,7 @@ export function ParticipantBattleScreen({ correctAnswers, onBattleComplete, sele
             <View style={[styles.statusDot, tracking === "normal" && styles.statusDotReady]} />
             <Text numberOfLines={1} style={styles.statusText}>{trackingLabel}</Text>
           </View>
-          <View style={styles.timerPill}><Text style={styles.timerText}>00:60</Text></View>
+          <View style={styles.timerPill}><Text style={styles.timerText}>00:{String(secondsRemaining).padStart(2, "0")}</Text></View>
           <Pressable accessibilityRole="button" onPress={onBattleComplete} style={({ pressed }) => [styles.demoEnd, pressed && styles.pressed]}>
             <Text style={styles.demoEndText}>Finish demo</Text>
           </Pressable>
@@ -107,16 +118,16 @@ export function ParticipantBattleScreen({ correctAnswers, onBattleComplete, sele
         <View style={styles.hud}>
           <View style={styles.targetRow}>
             <View style={styles.targetCopy}>
-              <Text style={styles.targetName}>MIRA</Text>
-              <Text style={styles.targetStats}>{targetStats.hp} HP · {targetStats.shield} shield</Text>
+              <Text style={styles.targetName}>{target?.nickname.toUpperCase() ?? "NO TARGET"}</Text>
+              <Text style={styles.targetStats}>{targetStats ? `${targetStats.hp} HP · ${targetStats.shield} shield` : "Waiting for opponent"}</Text>
             </View>
             <Text accessibilityLiveRegion="polite" style={styles.action}>{lastAction}</Text>
           </View>
           <BattleStatsPanel battleStats={battleStats} label={`You · ${getCharacter(selection.characterId).displayName}`} />
           <Text style={styles.safety}>Feet planted · rotate in place to aim</Text>
           <View style={styles.attackRow}>
-            <AttackButton accent={colors.accent} detail={readinessDetail("bolt")} disabled={!boltReadiness.ready} id="bolt" label="Bolt" onPress={useAttack} />
-            <AttackButton accent={colors.fire} detail={readinessDetail("fireball")} disabled={!fireballReadiness.ready} id="fireball" label="Fireball" onPress={useAttack} />
+            <AttackButton accent={colors.accent} detail={readinessDetail("bolt")} disabled={!boltReadiness.ready || !target} id="bolt" label="Bolt" onPress={useAttack} />
+            <AttackButton accent={colors.fire} detail={readinessDetail("fireball")} disabled={!fireballReadiness.ready || !target} id="fireball" label="Fireball" onPress={useAttack} />
           </View>
         </View>
       </SafeAreaView>

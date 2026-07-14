@@ -1,7 +1,6 @@
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { CharacterPreview } from "../components/CharacterPreview";
-import { CharacterPreview3D } from "../ar/CharacterPreview3D";
 import { colors } from "../components/theme";
 import {
   characterCatalog,
@@ -51,7 +50,10 @@ export function CharacterCustomizationScreen({
             <Text style={styles.subtitle}>Your choice is shared with every player before battle.</Text>
           </View>
           <View style={styles.previewWrap}>
-            <CharacterPreview3D selection={selection} />
+            <CharacterPreview
+              characterId={selection.characterId}
+              colorId={selection.colorId}
+            />
           </View>
         </View>
 

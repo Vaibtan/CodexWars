@@ -15,7 +15,6 @@ export function ParticipantPlacementArView({
   return (
     <ViroARSceneNavigator
       initialScene={{ scene: CharacterPlacementScene }}
-      key={`${selection.characterId}-${selection.colorId}`}
       style={{ flex: 1 }}
       viroAppProps={bridge}
     />

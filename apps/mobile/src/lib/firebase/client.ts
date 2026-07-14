@@ -1,6 +1,11 @@
 import { getApp, getApps, initializeApp, type FirebaseApp, type FirebaseOptions } from "firebase/app";
 import { connectAuthEmulator, getAuth, signInAnonymously, type Auth, type User } from "firebase/auth";
 import {
+  connectDatabaseEmulator,
+  getDatabase,
+  type Database,
+} from "firebase/database";
+import {
   connectFirestoreEmulator,
   getFirestore,
   type Firestore,
@@ -9,6 +14,7 @@ import {
 type FirebaseServices = {
   app: FirebaseApp;
   auth: Auth;
+  database: Database;
   firestore: Firestore;
 };
 
@@ -19,13 +25,14 @@ const config: FirebaseOptions = {
   storageBucket: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET,
   messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
   appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID,
+  databaseURL: process.env.EXPO_PUBLIC_FIREBASE_DATABASE_URL,
 };
 
 let services: FirebaseServices | null | undefined;
 let emulatorsConnected = false;
 
 export function isFirebaseConfigured(): boolean {
-  return Boolean(config.apiKey && config.projectId && config.appId);
+  return Boolean(config.apiKey && config.projectId && config.appId && config.databaseURL);
 }
 
 export function getFirebaseServices(): FirebaseServices | null {
@@ -40,16 +47,18 @@ export function getFirebaseServices(): FirebaseServices | null {
 
   const app = getApps().length > 0 ? getApp() : initializeApp(config);
   const auth = getAuth(app);
+  const database = getDatabase(app, config.databaseURL);
   const firestore = getFirestore(app);
   const emulatorHost = process.env.EXPO_PUBLIC_FIREBASE_EMULATOR_HOST;
 
   if (__DEV__ && emulatorHost && !emulatorsConnected) {
     connectAuthEmulator(auth, `http://${emulatorHost}:9099`, { disableWarnings: true });
+    connectDatabaseEmulator(database, emulatorHost, 9000);
     connectFirestoreEmulator(firestore, emulatorHost, 8080);
     emulatorsConnected = true;
   }
 
-  services = { app, auth, firestore };
+  services = { app, auth, database, firestore };
   return services;
 }
 

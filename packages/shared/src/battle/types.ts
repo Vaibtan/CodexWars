@@ -94,6 +94,16 @@ export interface RejectedAttack {
 
 export type AttackResult = AppliedAttack | RejectedAttack;
 
+export type WeaponUseResult =
+  | { attacker: BattleLoadout; status: "applied"; weaponId: WeaponId }
+  | {
+      attacker: BattleLoadout;
+      code: Exclude<AttackRejectionCode, "TARGET_ELIMINATED">;
+      retryAtMs?: number;
+      status: "rejected";
+      weaponId: WeaponId;
+    };
+
 export type WeaponReadiness =
   | { ready: true }
   | {

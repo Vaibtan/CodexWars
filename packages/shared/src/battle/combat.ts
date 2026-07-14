@@ -6,6 +6,7 @@ import type {
   WeaponId,
   WeaponReadiness,
   WeaponStats,
+  WeaponUseResult,
 } from "./types.js";
 
 export function getWeaponReadiness(
@@ -95,5 +96,39 @@ export function resolveAttack(input: ResolveAttackInput): AttackResult {
     status: "applied",
     target,
     weaponId: input.weaponId,
+  };
+}
+
+/** Consumes cooldown/charges for a valid shot that did not hit a target. */
+export function consumeWeaponUse(
+  attacker: BattleLoadout,
+  weaponId: WeaponId,
+  nowMs: number,
+): WeaponUseResult {
+  const readiness = getWeaponReadiness(attacker, weaponId, nowMs);
+  if (!readiness.ready) {
+    return {
+      attacker,
+      code: readiness.code,
+      ...(readiness.retryAtMs === undefined ? {} : { retryAtMs: readiness.retryAtMs }),
+      status: "rejected",
+      weaponId,
+    };
+  }
+  const weapon = attacker.weapons[weaponId];
+  return {
+    attacker: {
+      ...attacker,
+      weapons: {
+        ...attacker.weapons,
+        [weaponId]: {
+          ...weapon,
+          charges: weapon.charges === null ? null : weapon.charges - 1,
+          nextReadyAtMs: nowMs + weapon.cooldownMs,
+        },
+      },
+    },
+    status: "applied",
+    weaponId,
   };
 }

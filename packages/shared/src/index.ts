@@ -1,4 +1,5 @@
 export * from "./battle/index.js";
+export * from "./realtime/index.js";
 
 export type CharacterId = "knight" | "ninja" | "wizard";
 
@@ -9,7 +10,15 @@ export interface CharacterSelection {
   colorId: CharacterColorId;
 }
 
-export type RoomPhase = "lobby" | "quiz" | "localization" | "positioning" | "countdown" | "battle" | "results";
+export type RoomPhase =
+  | "lobby"
+  | "quiz"
+  | "quiz-results"
+  | "arena-setup"
+  | "positioning"
+  | "countdown"
+  | "battle"
+  | "results";
 
 export interface ArenaPosition {
   x: number;

@@ -40,11 +40,10 @@ export function CharacterPlacementScene(props: ArSceneProps = {}) {
       onTrackingUpdated={(state) => bridge?.onTrackingChanged(mapViroTrackingState(state))}
     >
       <ViroAmbientLight color="#FFFFFF" intensity={220} />
-      <ViroARPlane alignment="Horizontal" minHeight={0.5} minWidth={0.5}>
+      <ViroARPlane alignment="Horizontal" minHeight={0.5} minWidth={0.5} onClick={placeCharacter}>
         <ViroQuad
           height={4}
           materials={["placementRing"]}
-          onClick={placeCharacter}
           opacity={0.01}
           position={[0, 0.004, 0]}
           rotation={[-90, 0, 0]}
