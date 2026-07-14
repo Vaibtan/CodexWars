@@ -19,6 +19,7 @@ const placementSceneSourceUrl = new URL(
   "../src/ar/scenes/CharacterPlacementScene.tsx",
   import.meta.url,
 );
+const appSourceUrl = new URL("../App.tsx", import.meta.url);
 
 test("leaving character customization does not recycle a native Viro preview", async () => {
   const source = await readFile(customizationSourceUrl, "utf8");
@@ -54,4 +55,11 @@ test("AR placement does not pass the incompatible onClick prop to ViroQuad", asy
   assert.doesNotMatch(quad, /onClick=/);
   assert.doesNotMatch(quad, /onClickState=/);
   assert.match(source, /<ViroNode onClick=\{placeCharacter\}>/);
+});
+
+test("the Firebase app flow uses the imported participant and organizer screens", async () => {
+  const source = await readFile(appSourceUrl, "utf8");
+  assert.match(source, /<OrganizerDashboardScreen/);
+  assert.match(source, /<ParticipantQuizScreen/);
+  assert.match(source, /<ParticipantQuizResultsScreen/);
 });

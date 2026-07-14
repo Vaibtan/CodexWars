@@ -1,9 +1,18 @@
 import { useState } from "react";
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import {
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { colors } from "../components/theme";
-import { APP_NAME, APP_TAGLINE } from "../config/app";
-import { isFirebaseConfigured } from "../lib/firebase/client";
+
+type HomeStep = "welcome" | "participant" | "organizer";
 
 type HomeScreenProps = {
   busy: boolean;
@@ -14,261 +23,106 @@ type HomeScreenProps = {
 };
 
 export function HomeScreen({ busy, error, onCreateRoom, onJoinRoom, onTestAr }: HomeScreenProps) {
+  const [step, setStep] = useState<HomeStep>("welcome");
   const [nickname, setNickname] = useState("");
   const [roomCode, setRoomCode] = useState("");
 
   return (
-    <SafeAreaView edges={["top", "bottom"]} style={styles.screen}>
-      <View style={styles.topBar}>
-        <Text style={styles.wordmark}>{APP_NAME}</Text>
-        <View style={styles.buildBadge}>
-          <View style={styles.liveDot} />
-          <Text style={styles.buildBadgeText}>DEMO BUILD</Text>
-        </View>
-      </View>
-
-      <View style={styles.hero}>
-        <Text accessibilityRole="header" style={styles.title}>
-          Turn the room into an arena.
-        </Text>
-        <Text style={styles.tagline}>{APP_TAGLINE}</Text>
-        <Text style={styles.detail}>
-          Create or join a synchronized War Room. Quiz results, character readiness,
-          battle damage, and the action log flow through Firebase Realtime Database.
-        </Text>
-      </View>
-
-      <View style={styles.demoSection}>
-        <Text style={styles.fieldLabel}>DISPLAY NAME</Text>
-        <TextInput
-          autoCapitalize="words"
-          editable={!busy}
-          maxLength={32}
-          onChangeText={setNickname}
-          placeholder="Your name"
-          placeholderTextColor={colors.inkSubtle}
-          style={styles.input}
-          value={nickname}
-        />
-        <Text style={styles.fieldLabel}>ROOM CODE</Text>
-        <TextInput
-          editable={!busy}
-          keyboardType="number-pad"
-          maxLength={6}
-          onChangeText={(value) => setRoomCode(value.replace(/\D/g, ""))}
-          placeholder="6 digits"
-          placeholderTextColor={colors.inkSubtle}
-          style={styles.input}
-          value={roomCode}
-        />
-
-        <Pressable
-          accessibilityHint="Joins an existing War Room as a participant"
-          accessibilityRole="button"
-          disabled={busy || roomCode.length !== 6}
-          onPress={() => void onJoinRoom(roomCode, nickname)}
-          style={({ pressed }) => [styles.primaryButton, (busy || roomCode.length !== 6) && styles.buttonDisabled, pressed && styles.primaryButtonPressed]}
-        >
-          <Text style={styles.primaryButtonText}>{busy ? "Connecting…" : "Join War Room"}</Text>
-          <Text style={styles.primaryButtonArrow}>→</Text>
-        </Pressable>
-        <Pressable
-          accessibilityHint="Creates a synchronized War Room as organizer"
-          accessibilityRole="button"
-          disabled={busy}
-          onPress={() => void onCreateRoom(nickname)}
-          style={({ pressed }) => [styles.organizerButton, pressed && styles.primaryButtonPressed]}
-        >
-          <Text style={styles.organizerButtonText}>Create War Room</Text>
-        </Pressable>
-        <Pressable
-          accessibilityHint="Opens a standalone camera scene for placing a 3D character"
-          accessibilityRole="button"
-          disabled={busy}
-          onPress={onTestAr}
-          style={({ pressed }) => [styles.arTestButton, pressed && styles.primaryButtonPressed]}
-        >
-          <Text style={styles.arTestButtonText}>Test AR · Place character</Text>
-          <Text style={styles.arTestButtonIcon}>◎</Text>
-        </Pressable>
-        {error ? <Text accessibilityLiveRegion="assertive" style={styles.error}>{error}</Text> : null}
-      </View>
-
-      <Text style={styles.firebaseState}>
-        Firebase Realtime Database · {isFirebaseConfigured() ? "configured" : "setup pending"}
-      </Text>
+    <SafeAreaView edges={["top", "bottom"]} style={styles.safeArea}>
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.flex}>
+        <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+          <Brand />
+          {step === "welcome" ? (
+            <View style={styles.welcome}>
+              <View style={styles.orbit}>
+                <View style={styles.orbitCore}><Text style={styles.orbitIcon}>✦</Text></View>
+              </View>
+              <Text style={styles.kicker}>KNOWLEDGE BECOMES POWER</Text>
+              <Text accessibilityRole="header" style={styles.hero}>Turn learning{"\n"}into <Text style={styles.accent}>battle.</Text></Text>
+              <Text style={styles.copy}>Earn powers through knowledge, meet classmates in the arena, and make every answer count.</Text>
+              <ActionButton label="Join as participant" onPress={() => setStep("participant")} />
+              <ActionButton label="Join as organizer" onPress={() => setStep("organizer")} secondary />
+              <Pressable accessibilityRole="button" onPress={onTestAr} style={styles.testButton}>
+                <Text style={styles.testButtonText}>Test AR character placement</Text><Text style={styles.testIcon}>◎</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <View style={styles.form}>
+              <Pressable accessibilityRole="button" onPress={() => setStep("welcome")} style={styles.backButton}>
+                <Text style={styles.backText}>‹  Back</Text>
+              </Pressable>
+              <Text style={styles.kicker}>{step === "participant" ? "PLAYER ACCESS" : "ORGANIZER ACCESS"}</Text>
+              <Text accessibilityRole="header" style={styles.title}>
+                {step === "participant" ? "Enter the arena." : "Create your War Room."}
+              </Text>
+              <Text style={styles.copyLeft}>
+                {step === "participant"
+                  ? "Use the six-digit code shared by your organizer. Your name will appear in the live lobby."
+                  : "Choose the name participants will see, then share the generated room code."}
+              </Text>
+              <Field editable={!busy} label={step === "participant" ? "YOUR NAME" : "ORGANIZER NAME"} maxLength={32} onChangeText={setNickname} placeholder="Enter your name" value={nickname} />
+              {step === "participant" ? (
+                <Field editable={!busy} keyboardType="number-pad" label="ROOM CODE" maxLength={6} onChangeText={(value) => setRoomCode(value.replace(/\D/g, ""))} placeholder="482913" value={roomCode} />
+              ) : null}
+              {error ? <Text accessibilityLiveRegion="assertive" style={styles.error}>{error}</Text> : null}
+              <ActionButton
+                disabled={busy || !nickname.trim() || (step === "participant" && roomCode.length !== 6)}
+                label={busy ? "Connecting…" : step === "participant" ? "Join War Room  →" : "Create War Room  →"}
+                onPress={() => step === "participant" ? void onJoinRoom(roomCode, nickname) : void onCreateRoom(nickname)}
+              />
+            </View>
+          )}
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
+function Brand() {
+  return <View style={styles.brand}><View style={styles.brandMark}><Text style={styles.brandMarkText}>C</Text></View><Text style={styles.brandText}>CODEX<Text style={styles.accent}>WARS</Text></Text></View>;
+}
+
+function Field(props: React.ComponentProps<typeof TextInput> & { label: string }) {
+  const { label, ...inputProps } = props;
+  return <View style={styles.field}><Text style={styles.fieldLabel}>{label}</Text><TextInput {...inputProps} autoCapitalize="words" placeholderTextColor="#77727F" style={styles.input} /></View>;
+}
+
+function ActionButton({ disabled, label, onPress, secondary }: { disabled?: boolean; label: string; onPress: () => void; secondary?: boolean }) {
+  return <Pressable accessibilityRole="button" accessibilityState={{ disabled }} disabled={disabled} onPress={onPress} style={({ pressed }) => [styles.action, secondary && styles.actionSecondary, disabled && styles.disabled, pressed && styles.pressed]}><Text style={[styles.actionText, secondary && styles.actionSecondaryText]}>{label}</Text></Pressable>;
+}
+
 const styles = StyleSheet.create({
-  screen: {
-    backgroundColor: colors.background,
-    flex: 1,
-    paddingHorizontal: 24,
-  },
-  topBar: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    minHeight: 64,
-  },
-  wordmark: {
-    color: colors.ink,
-    fontSize: 18,
-    fontWeight: "800",
-    letterSpacing: -0.3,
-  },
-  buildBadge: {
-    alignItems: "center",
-    borderColor: colors.outline,
-    borderRadius: 999,
-    borderWidth: 1,
-    flexDirection: "row",
-    gap: 7,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-  },
-  liveDot: {
-    backgroundColor: colors.success,
-    borderRadius: 4,
-    height: 8,
-    width: 8,
-  },
-  buildBadgeText: {
-    color: colors.inkMuted,
-    fontSize: 11,
-    fontWeight: "800",
-    letterSpacing: 0.8,
-  },
-  hero: {
-    flex: 1,
-    justifyContent: "center",
-    maxWidth: 560,
-    paddingBottom: 28,
-    paddingTop: 24,
-  },
-  title: {
-    color: colors.ink,
-    fontSize: 46,
-    fontWeight: "800",
-    letterSpacing: -1.5,
-    lineHeight: 49,
-  },
-  tagline: {
-    color: colors.accent,
-    fontSize: 20,
-    fontWeight: "700",
-    marginTop: 16,
-  },
-  detail: {
-    color: colors.inkMuted,
-    fontSize: 16,
-    lineHeight: 24,
-    marginTop: 14,
-    maxWidth: 430,
-  },
-  demoSection: {
-    backgroundColor: colors.backgroundRaised,
-    borderRadius: 16,
-    padding: 18,
-  },
-  fieldLabel: { color: colors.inkSubtle, fontSize: 10, fontWeight: "800", letterSpacing: 0.8, marginBottom: 6, marginTop: 12 },
-  input: { backgroundColor: colors.surface, borderColor: colors.outline, borderRadius: 12, borderWidth: 1, color: colors.ink, fontSize: 16, minHeight: 50, paddingHorizontal: 14 },
-  buttonDisabled: { opacity: 0.45 },
-  error: { color: colors.danger, fontSize: 12, lineHeight: 17, marginTop: 10, textAlign: "center" },
-  stepRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 14,
-  },
-  stepNumber: {
-    alignItems: "center",
-    backgroundColor: colors.surfaceStrong,
-    borderRadius: 999,
-    height: 38,
-    justifyContent: "center",
-    width: 38,
-  },
-  stepNumberText: {
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: "800",
-  },
-  stepCopy: {
-    flex: 1,
-  },
-  stepTitle: {
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: "700",
-  },
-  stepDetail: {
-    color: colors.inkSubtle,
-    fontSize: 13,
-    lineHeight: 18,
-    marginTop: 3,
-  },
-  stepDivider: {
-    backgroundColor: colors.outline,
-    height: 1,
-    marginVertical: 14,
-  },
-  primaryButton: {
-    alignItems: "center",
-    backgroundColor: colors.accent,
-    borderRadius: 14,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginTop: 20,
-    minHeight: 56,
-    paddingHorizontal: 18,
-  },
-  primaryButtonPressed: {
-    opacity: 0.84,
-    transform: [{ scale: 0.99 }],
-  },
-  primaryButtonText: {
-    color: colors.accentInk,
-    fontSize: 17,
-    fontWeight: "800",
-  },
-  primaryButtonArrow: {
-    color: colors.accentInk,
-    fontSize: 24,
-    fontWeight: "700",
-  },
-  organizerButton: {
-    alignItems: "center",
-    borderColor: colors.outline,
-    borderRadius: 14,
-    borderWidth: 1,
-    justifyContent: "center",
-    marginTop: 10,
-    minHeight: 52,
-  },
-  organizerButtonText: {
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: "800",
-  },
-  arTestButton: {
-    alignItems: "center",
-    backgroundColor: colors.surfaceStrong,
-    borderRadius: 14,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginTop: 10,
-    minHeight: 52,
-    paddingHorizontal: 16,
-  },
-  arTestButtonText: { color: colors.ink, fontSize: 15, fontWeight: "800" },
-  arTestButtonIcon: { color: colors.accent, fontSize: 22, fontWeight: "900" },
-  firebaseState: {
-    color: colors.inkSubtle,
-    fontSize: 12,
-    marginBottom: 8,
-    marginTop: 14,
-    textAlign: "center",
-  },
+  safeArea: { backgroundColor: colors.background, flex: 1 },
+  flex: { flex: 1 },
+  scroll: { flexGrow: 1, paddingBottom: 28, paddingHorizontal: 22 },
+  brand: { alignItems: "center", flexDirection: "row", gap: 10, minHeight: 64 },
+  brandMark: { alignItems: "center", backgroundColor: colors.accent, borderRadius: 10, height: 34, justifyContent: "center", width: 34 },
+  brandMarkText: { color: colors.ink, fontSize: 18, fontWeight: "900" },
+  brandText: { color: colors.ink, fontSize: 14, fontWeight: "900", letterSpacing: 1 },
+  accent: { color: colors.accent },
+  welcome: { flex: 1, justifyContent: "center", paddingBottom: 26 },
+  orbit: { alignItems: "center", alignSelf: "center", borderColor: "rgba(149, 97, 255, 0.3)", borderRadius: 70, borderWidth: 1, height: 140, justifyContent: "center", marginBottom: 30, width: 140 },
+  orbitCore: { alignItems: "center", backgroundColor: colors.surfaceStrong, borderColor: colors.accent, borderRadius: 43, borderWidth: 1, height: 86, justifyContent: "center", width: 86 },
+  orbitIcon: { color: colors.success, fontSize: 36 },
+  kicker: { color: colors.success, fontSize: 11, fontWeight: "900", letterSpacing: 1.2 },
+  hero: { color: colors.ink, fontSize: 46, fontWeight: "900", letterSpacing: -1.7, lineHeight: 50, marginTop: 12 },
+  copy: { color: colors.inkMuted, fontSize: 16, lineHeight: 24, marginBottom: 22, marginTop: 16 },
+  copyLeft: { color: colors.inkMuted, fontSize: 15, lineHeight: 22, marginBottom: 12, marginTop: 12 },
+  action: { alignItems: "center", backgroundColor: colors.accent, borderRadius: 13, justifyContent: "center", marginTop: 12, minHeight: 56, paddingHorizontal: 16 },
+  actionSecondary: { backgroundColor: colors.backgroundRaised, borderColor: colors.outline, borderWidth: 1 },
+  actionText: { color: colors.ink, fontSize: 16, fontWeight: "900" },
+  actionSecondaryText: { color: colors.ink },
+  pressed: { opacity: 0.8, transform: [{ scale: 0.99 }] },
+  disabled: { opacity: 0.45 },
+  testButton: { alignItems: "center", flexDirection: "row", justifyContent: "center", minHeight: 52, paddingTop: 10 },
+  testButtonText: { color: colors.inkMuted, fontSize: 14, fontWeight: "700" },
+  testIcon: { color: colors.success, fontSize: 20, marginLeft: 9 },
+  form: { flex: 1, justifyContent: "center", paddingBottom: 40 },
+  backButton: { alignSelf: "flex-start", justifyContent: "center", marginBottom: 30, minHeight: 48, paddingRight: 20 },
+  backText: { color: colors.inkMuted, fontSize: 15, fontWeight: "800" },
+  title: { color: colors.ink, fontSize: 37, fontWeight: "900", letterSpacing: -1.1, lineHeight: 42, marginTop: 10 },
+  field: { marginTop: 15 },
+  fieldLabel: { color: colors.inkMuted, fontSize: 11, fontWeight: "900", letterSpacing: 0.8, marginBottom: 7 },
+  input: { backgroundColor: colors.backgroundRaised, borderColor: colors.outline, borderRadius: 12, borderWidth: 1, color: colors.ink, fontSize: 17, minHeight: 56, paddingHorizontal: 15 },
+  error: { color: colors.danger, fontSize: 13, lineHeight: 18, marginTop: 12 },
 });

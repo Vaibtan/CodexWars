@@ -11,14 +11,20 @@ import { CharacterCustomizationScreen } from "./src/screens/CharacterCustomizati
 import { BattleResultsScreen } from "./src/screens/BattleResultsScreen";
 import { ArCharacterTestScreen } from "./src/screens/ArCharacterTestScreen";
 import { HomeScreen } from "./src/screens/HomeScreen";
+import { OrganizerDashboardScreen } from "./src/screens/OrganizerDashboardScreen";
 import { ParticipantBattleScreen } from "./src/screens/ParticipantBattleScreen";
 import { ParticipantPlacementScreen } from "./src/screens/ParticipantPlacementScreen";
+import { ParticipantQuizResultsScreen } from "./src/screens/ParticipantQuizResultsScreen";
+import { ParticipantQuizScreen } from "./src/screens/ParticipantQuizScreen";
 import { QuizWaitingScreen } from "./src/screens/QuizWaitingScreen";
 
 type AppScreen =
   | "home"
   | "ar-character-test"
+  | "organizer-dashboard"
   | "quiz-waiting"
+  | "participant-quiz"
+  | "participant-quiz-results"
   | "ar-demo"
   | "character-customization"
   | "participant-placement"
@@ -50,9 +56,14 @@ export default function App() {
 
   useEffect(() => {
     if (!session || !warRoom.room) return;
-    if (session.role === "participant" && localMember?.quizCompleted && screen === "quiz-waiting") {
-      setSelection(localMember.selection ?? initialSelection);
-      setScreen("character-customization");
+    if (session.role === "participant" && warRoom.room.phase === "quiz" && screen === "quiz-waiting") {
+      setScreen("participant-quiz");
+    }
+    if (session.role === "participant" && warRoom.room.phase === "quiz-results" && ["quiz-waiting", "participant-quiz"].includes(screen)) {
+      setScreen("participant-quiz-results");
+    }
+    if (session.role === "organizer" && warRoom.room.phase === "arena-setup" && screen === "organizer-dashboard") {
+      setScreen("ar-demo");
     }
     if (session.role === "participant" && warRoom.room.phase === "battle" && screen === "participant-placement") {
       setScreen("participant-battle");
@@ -73,7 +84,7 @@ export default function App() {
     try {
       const nextSession = await createWarRoom(nickname);
       setSession(nextSession);
-      setScreen("ar-demo");
+      setScreen("organizer-dashboard");
     } catch (error) {
       setConnectionError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -108,8 +119,25 @@ export default function App() {
         />
       )}
       {screen === "ar-character-test" && <ArCharacterTestScreen onDone={() => setScreen("home")} />}
+      {screen === "organizer-dashboard" && session && warRoom.room && (
+        <OrganizerDashboardScreen connected={warRoom.connected} onLeave={leaveRoom} room={warRoom.room} session={session} />
+      )}
       {screen === "quiz-waiting" && session && (
         <QuizWaitingScreen connected={warRoom.connected} onLeave={leaveRoom} room={warRoom.room} session={session} />
+      )}
+      {screen === "participant-quiz" && session && warRoom.room && (
+        <ParticipantQuizScreen onLeave={leaveRoom} room={warRoom.room} session={session} />
+      )}
+      {screen === "participant-quiz-results" && session && warRoom.room && (
+        <ParticipantQuizResultsScreen
+          onContinue={() => {
+            setSelection(localMember?.selection ?? initialSelection);
+            setScreen("character-customization");
+          }}
+          onLeave={leaveRoom}
+          participantId={session.uid}
+          room={warRoom.room}
+        />
       )}
       {screen === "character-customization" && session && warRoom.room && (
         <CharacterCustomizationScreen
