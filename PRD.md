@@ -1,6 +1,6 @@
 # CodexWars — Product Requirements Document
 
-**Version:** 2.2
+**Version:** 2.3
 **Status:** Approved direction — the active technical specifications are `BUILD_SPEC.md`, `ARCHITECTURE.md`, and `docs/AR_IMPLEMENTATION_SPEC.md`; `docs/archive/CODEXWARS_PRD_TDD_v1.md` is retired reference material
 **Horizons:** Hackathon demo first → evolve into a real product
 **Primary platforms:** Android and iOS (both required for P0; iOS iterates through EAS cloud development builds and is rehearsed through TestFlight on physical iPhones)
@@ -30,7 +30,7 @@ These decisions were made after researching the July 2026 AR landscape and the h
 | D6 | **Quiz rewards become a budget of choices with catch-up mechanics on the product roadmap** (flat mapping stays for the hackathon MVP). | Gimkit/Blooket research: successful platforms map score to spendable resources plus randomness/steal mechanics. "Quiz winner automatically wins the battle" is a documented failure mode — the battle must favor the quiz winner, not crown them. |
 | D7 | **Privacy-minimal by design: nickname-only joins, no accounts, no camera upload, no third-party ad/analytics SDKs.** | Classroom tools spread teacher-driven and bottom-up; COPPA applies to under-13 users regardless of who consented. Minimal data collection keeps a single teacher able to run a session with zero IT approval. |
 | D8 | **P0 renders one bundled default GLB avatar, basic bolt, and shield-only quiz rewards.** Three selectable bundled GLB cosmetics, fireball, and free spectator view are P1. | GLB rendering provides the requested 3D AR presence while gameplay remains a small, deterministic 2D system. |
-| D9 | **P0 tracking loss is local and non-pausing during battle.** Before battle it clears readiness; during battle the player continues from their last valid transform with a re-scan prompt. | A global pause is too disruptive for the vertical slice. Organizer-controlled pause/recovery policy is P1. |
+| D9 | **P0 tracking loss is local and non-pausing during battle.** Before battle it clears readiness. During battle the locked server position survives, but firing is allowed only while the AR module is producing a fresh tracked or inertial pose; a stale/unavailable pose disables firing and shows a re-scan prompt. | A global pause is too disruptive for the vertical slice, but firing from a frozen aim direction would be incorrect and unfair. Organizer-controlled pause/recovery policy is P1. |
 
 ---
 
@@ -42,6 +42,7 @@ These decisions were made after researching the July 2026 AR landscape and the h
 - Prints/places the arena marker and defines the arena
 - Monitors readiness on a top-down minimap
 - Starts and ends the battle; sees final standings
+- Is a non-combat controller in P0 and never counts toward participant capacity or battle readiness; a dual organizer/player role is post-P0
 
 ### Participant (student / attendee)
 - Joins with the room code and a nickname (no account)
@@ -50,7 +51,7 @@ These decisions were made after researching the July 2026 AR landscape and the h
 - Scans the floor marker to localize, locks a standing position
 - Battles: rotates in place, aims through the camera, fires
 
-**Scale:** up to 12 participants per arena. Demo target: 3–4 physical devices, with the data model validated for 12.
+**Scale:** up to 12 participants plus one non-combat organizer per room. Quiz-only participants still count toward the 12-participant room limit but are excluded from combat capacity and readiness. Demo target: 3–4 physical devices, with the data model validated for 12 participants.
 
 ---
 
@@ -179,13 +180,16 @@ so the quiz winner is favored, never guaranteed.
 
 ### FR-1: Create room
 Organizer creates a room and receives an active four-digit code.
-- Exactly four digits; active codes never collide; room expires after two hours of inactivity; creator gets host privileges.
+- Room creation happens through the Colyseus matchmaking connection flow before ordinary room messages can be sent. The server assigns the four-digit public code as the room identifier and returns the connected room to the organizer.
+- Exactly four digits; active codes never collide; room expires after two hours of inactivity; creator gets server-bound host privileges and a rotating reconnect token.
+- The organizer is a non-combat role in P0. Organizer-only commands are rejected unless the connected client owns that server-assigned role.
 
 ### FR-2: Join room
 Participant joins with code + nickname.
 - Invalid/expired code → clear inline error, entered name retained.
 - Duplicate nicknames get a suffix; participant #13 is rejected.
-- Before the quiz, the organizer may mark a participant quiz-only; quiz-only participants do not need AR localization or a position and never block battle start.
+- Joining resolves the four-digit code through Colyseus matchmaking before normal room state/messages begin; `join_room` is not an in-room command.
+- Before the quiz, the organizer may mark a participant quiz-only; quiz-only participants still count toward the 12-participant room limit, do not need AR localization or a position, and never block battle start.
 
 ### FR-2a: Run the P0 quiz
 The organizer selects the bundled `programming-fundamentals-v1` template and starts the session. The server presents one question at a time, accepts one answer per participant before the server deadline, reveals the answer and explanation for five seconds, then advances automatically. Correct answers and explanations remain server-private until each question closes.
@@ -193,24 +197,26 @@ The organizer selects the bundled `programming-fundamentals-v1` template and sta
 ### FR-3: Localize via marker
 Each client establishes the shared arena origin by recognizing the floor marker.
 - App bundles the marker image and a printable PDF.
-- Client reports localization state (`searching` / `localized` / `lost`) to the server.
+- Client reports coarse localization state (`searching` / `localized` / `lost`) to the server. Pose freshness and quality remain local to the AR module.
 - Guided scan UX with retry; AR P0 battle start is blocked for unlocalized combat participants. P1 minimap participants use a separately defined readiness path.
-- Before countdown, loss clears readiness. After position lock during P0 battle, loss does not invalidate the locked position: aiming continues from the last valid transform with a re-scan prompt.
+- Before countdown, loss clears readiness. After position lock during P0 battle, loss does not invalidate the locked server position. A fresh inertial pose may continue aiming; a stale or unavailable pose disables firing locally and shows a re-scan prompt.
 
 ### FR-4: Lock position
-- Stored as marker-relative X/Z; rejected outside the boundary or violating minimum spacing, with directional guidance; unlockable before start; visible on the organizer minimap.
+- Stored as marker-relative X/Z; rejected outside the arena, inside the marker safety zone, or violating minimum spacing. Rejections include a structured correction vector/distance for directional guidance; positions are unlockable before start and visible on the organizer minimap.
 
 ### FR-5: Start battle
 - Server permits start only when every combat-included participant is connected, localized, quiz-complete, positioned, and ready; quiz-only participants are excluded from this invariant.
 - Server emits a future `startsAt` and a server-time offset; all clients run the countdown from server time.
+- The non-combat organizer never participates in this invariant. If the organizer disconnects before countdown, progression waits up to 60 seconds for reconnection; an already-started countdown or battle continues server-authoritatively.
 
 ### FR-6: Resolve attack
-- Client sends weapon + aim direction (never a trusted target ID); P0 resolves attacks at server receipt time.
+- Client sends round ID, unique command ID, weapon, and a fresh aim direction (never a trusted target ID); P0 resolves attacks at server receipt time and deduplicates command IDs.
 - Server rejects attacks during cooldown, before start, from eliminated players.
-- Nearest eligible ray-circle intersection wins; shield absorbs before HP; authoritative result broadcast to all clients.
+- Nearest eligible ray-circle intersection wins; shield absorbs before HP; authoritative results carry the round ID and monotonically increasing event sequence so clients can reject stale/duplicate effects.
 
 ### FR-7: Complete battle
-- Eliminated players cannot attack; in P0 they see an eliminated overlay with live standings. Battle ends at last-player-standing or timer expiry; all clients agree on the winner; organizer can reset to lobby for another round.
+- Eliminated players cannot attack; in P0 they see an eliminated overlay with live standings. Battle ends at last-player-standing or timer expiry; all clients agree on the winner.
+- Organizer reset retains connected identities/nicknames/roles only; it increments `roundId` and clears quiz answers/scores/rewards, localization, positions, readiness, HP/shield, cooldowns, eliminations, and per-round event sequence.
 
 ---
 
@@ -226,9 +232,10 @@ Each client establishes the shared arena origin by recognizing the floor marker.
 - Colyseus reconnection reattaches a returning participant to their player record; room state survives brief disconnects.
 - Tracking loss surfaces immediately with recovery guidance.
 - Design for hostile school WiFi: tiny message payloads, low send rates, tolerate jitter; organizer-hotspot setup documented as the recommended network.
+- P0 is in-memory: a server-process restart ends the room and every client receives a clear session-ended/rejoin experience; restart recovery is not promised.
 
 ### Safety
-- Stationary play, minimum spacing, pre-battle safety notice ("feet planted, rotate only").
+- Stationary play, 1.5 m default minimum spacing, a 0.75 m marker exclusion radius, and a pre-battle safety notice ("feet planted, rotate only").
 - Fantasy effects only; nothing gun-shaped in UI or marketing.
 
 ### Privacy (D7)
