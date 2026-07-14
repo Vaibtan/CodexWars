@@ -12,7 +12,7 @@
 Reliability is the top-priority requirement for this build. Every choice below follows from these rules:
 
 1. **Pin everything.** Exact dependency versions, committed lockfile, no `^` ranges on the four load-bearing packages (Expo, Viro, Colyseus server/client). Upgrades happen deliberately, one package at a time, with a device test after each.
-2. **Prefer boring and proven over newest.** Expo SDK 56 over the days-old SDK 57; mature APIs over previews.
+2. **Prefer the verified native compatibility set over newest.** Expo SDK 54, React Native 0.81, and Viro 2.53.1 are locked together; mature APIs over previews.
 3. **The server never knows AR exists.** It consumes 2D coordinates and directions. This makes the entire combat/multiplayer layer testable in plain Node with zero devices, and keeps the AR layer swappable (up to and including a Unity rewrite) without touching game logic.
 4. **The AR layer sits behind one interface.** All Viro usage is confined to one module exposing a small contract (localization state, camera pose in arena coordinates). Nothing else imports Viro.
 5. **Keep live gameplay local; isolate the one cloud dependency.** Marker colocation, Colyseus room state, and combat run on a laptop server + phone hotspot LAN. Firestore is required only for quiz templates, submissions, and final results, through the server Admin SDK; a loss of internet must be surfaced before quiz start and never changes a resolved combat action.
@@ -28,8 +28,8 @@ Versions verified on npm, 2026-07-14:
 
 | Package | Version | Role | Notes |
 |---|---|---|---|
-| `expo` | **56.0.15** | App framework, dev builds | SDK 56 = mature line (Viro-proven). SDK 57.0.4 exists but is days old — revisit after M1. RN version comes from the SDK template; never override it. |
-| `@reactvision/react-viro` | **2.57.4** | AR rendering + image markers | Peer range: Expo ≥55 <58, RN ≥0.83 <0.87 — SDK 56 fits. Requires a **development build** (`expo prebuild` / dev client); Expo Go cannot load it. |
+| `expo` | **54.0.35** | App framework, dev builds | Locked with React Native 0.81.5 and Viro 2.53.1. RN version comes from the SDK template; keep the verified compatibility set together. |
+| `@reactvision/react-viro` | **2.53.1** | AR rendering + image markers | Locked to Expo SDK 54 / React Native 0.81 compatibility. Requires a **development build** (`expo prebuild` / dev client); Expo Go cannot load it. |
 | `colyseus` | **0.17.10** | Authoritative game server | 0.17 line: `defineServer()`, auto-reconnection, `onDrop`/`onReconnect` hooks. |
 | `@colyseus/sdk` | **0.17.43** | Mobile client for Colyseus | Official 0.17 client SDK. Pin and verify this exact pair with the 0.17.10 server in the first networking spike. |
 | `zustand` | 5.0.x | Client UI state | Small, no boilerplate. |

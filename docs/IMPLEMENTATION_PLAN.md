@@ -108,7 +108,7 @@ This is intentionally the first implementation task.
 
 ### Deliverables
 
-1. Create `apps/mobile` with Expo SDK 56, TypeScript strict mode, React Navigation, and a single `HomeScreen` that renders **“CodexWars — Hello World”**.
+1. Create `apps/mobile` with Expo SDK 54, TypeScript strict mode, React Navigation, and a single `HomeScreen` that renders **“CodexWars — Hello World”**.
 2. Add a minimal app shell with a status line showing build platform and app version.
 3. Configure the Viro Expo plugin but do not mount an AR scene yet.
 4. Build and install:

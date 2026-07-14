@@ -8,8 +8,8 @@
 
 | Concern | Recommendation | Why it fits P0 |
 |---|---|---|
-| Mobile frontend | **TypeScript + React Native + Expo SDK 56 development build**; React Navigation; Zustand for session and local battle UI state | One app codebase for Android and iOS. Expo development builds allow native modules; Expo Go does not. |
-| AR / 3D renderer | **`@reactvision/react-viro` 2.57.4**, isolated behind `apps/mobile/src/ar/` | Supplies ARCore-mode Android support, iOS native configuration, image markers, camera transform callbacks, billboarding, images, particles, and GLB rendering. |
+| Mobile frontend | **TypeScript + React Native + Expo SDK 54 development build**; React Navigation; Zustand for session and local battle UI state | One app codebase for Android and iOS. Expo development builds allow native modules; Expo Go does not. |
+| AR / 3D renderer | **`@reactvision/react-viro` 2.53.1**, isolated behind `apps/mobile/src/ar/` | Supplies ARCore-mode Android support, iOS native configuration, image markers, camera transform callbacks, billboarding, images, particles, and GLB rendering on the locked Expo SDK 54 / React Native 0.81 stack. |
 | Marker colocation | One bundled, printed, asymmetric A4 image target; `ViroARTrackingTargets` + `ViroARImageMarker`; physical width declared as **0.297 m** | Image markers are explicitly designed to place content relative to a known image. The physical-width input is essential for scale. No cloud anchor is needed. |
 | 3D assets / effects | **One bundled default GLB**, rendered by Viro under the marker node; billboard name/HP, bounded pooled bolt/flash effects, and Expo audio/haptics | GLB rendering is P0 presentation only. The server ignores mesh/bone/bounds/height and resolves only a floor-plane ray against canonical 2D player circles. No occlusion or real projectile physics in P0. |
 | Multiplayer backend | **Node.js 22 LTS + TypeScript + Colyseus 0.17.x**; one authoritative `WarRoom`; shared pure TypeScript combat package | Colyseus rooms provide state synchronization and WebSocket transport; the server can retain the authoritative 2D state and resolve discrete attacks. |

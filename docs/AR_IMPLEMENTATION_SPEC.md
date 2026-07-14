@@ -23,7 +23,7 @@ Therefore, a GLB is never a source of gameplay truth. It is a local visual repre
 
 | Concern | Decision | Reason |
 |---|---|---|
-| React Native AR bridge | `@reactvision/react-viro` 2.57.4 | The pinned stack in `BUILD_SPEC.md`; exposes ARKit on iOS and ARCore on Android behind one React Native API. |
+| React Native AR bridge | `@reactvision/react-viro` 2.53.1 | The pinned Expo SDK 54 / React Native 0.81 stack in `BUILD_SPEC.md`; exposes ARKit on iOS and ARCore on Android behind one React Native API. |
 | iOS tracking | ARKit, via Viro | ARKit owns camera tracking and image-marker recognition on iPhone. Do not create a parallel direct ARKit integration. |
 | Android tracking | ARCore, via Viro | The same `ArenaSession` must work on mixed-platform rooms. |
 | Shared origin | `ViroARImageMarker` and the bundled physical arena image | The PRD's deliberate replacement for cloud anchors. |
@@ -259,7 +259,7 @@ For each `PlayerState`:
 
 ### 7.4 Illustrative component boundary
 
-The exact Viro API options must be checked against the pinned 2.57.4 documentation while implementing, but the ownership shape is fixed:
+The exact Viro API options must be checked against the pinned 2.53.1 documentation while implementing, but the ownership shape is fixed:
 
 ```tsx
 function Avatar({ player, visualEvent }: AvatarProps) {
