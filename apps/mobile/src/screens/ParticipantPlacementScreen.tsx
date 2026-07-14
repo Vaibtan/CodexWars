@@ -1,10 +1,11 @@
 import { useMemo, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { ViroARSceneNavigator } from "@reactvision/react-viro";
+import { deriveBattleLoadout } from "@codexwars/shared";
+import { ParticipantPlacementArView } from "../ar/ParticipantPlacementArView";
+import { BattleStatsPanel } from "../components/BattleStatsPanel";
 import { CharacterPreview } from "../components/CharacterPreview";
 import { colors } from "../components/theme";
-import { CharacterPlacementScene } from "../ar/scenes/CharacterPlacementScene";
 import type { ArSceneBridge, ArTrackingState } from "../ar/types";
 import { getCharacter, getCharacterColor } from "../features/characters/characterCatalog";
 import type {
@@ -14,6 +15,7 @@ import type {
 } from "../features/characters/types";
 
 type ParticipantPlacementScreenProps = {
+  correctAnswers: number;
   onBack: () => void;
   onReady: (participant: WaitingParticipant) => void;
   onReturnHome: () => void;
@@ -29,6 +31,7 @@ const trackingCopy: Record<ArTrackingState, string> = {
 };
 
 export function ParticipantPlacementScreen({
+  correctAnswers,
   onBack,
   onReady,
   onReturnHome,
@@ -40,6 +43,10 @@ export function ParticipantPlacementScreen({
   const [waiting, setWaiting] = useState(false);
   const character = getCharacter(selection.characterId);
   const characterColor = getCharacterColor(selection.colorId);
+  const battleLoadout = useMemo(
+    () => deriveBattleLoadout({ correctAnswers, totalQuestions: 10 }),
+    [correctAnswers],
+  );
 
   const sceneBridge = useMemo<ArSceneBridge>(
     () => ({
@@ -67,47 +74,51 @@ export function ParticipantPlacementScreen({
   if (waiting) {
     return (
       <SafeAreaView edges={["top", "bottom"]} style={styles.waitingScreen}>
-        <View style={styles.waitingTop}>
-          <View style={styles.readyPill}>
-            <View style={styles.readyDot} />
-            <Text style={styles.readyPillText}>POSITION LOCKED</Text>
+        <ScrollView contentContainerStyle={styles.waitingContent} showsVerticalScrollIndicator={false}>
+          <View style={styles.waitingTop}>
+            <View style={styles.readyPill}>
+              <View style={styles.readyDot} />
+              <Text style={styles.readyPillText}>POSITION LOCKED</Text>
+            </View>
+            <Text accessibilityRole="header" style={styles.waitingTitle}>You’re in the arena.</Text>
+            <Text style={styles.waitingBody}>
+              The organizer can now see you as waiting. Keep your feet planted; the battle begins only when they press Start battle.
+            </Text>
           </View>
-          <Text accessibilityRole="header" style={styles.waitingTitle}>You’re in the arena.</Text>
-          <Text style={styles.waitingBody}>
-            The organizer can now see you as waiting. Keep your feet planted; the battle begins only when they press Start battle.
-          </Text>
-        </View>
 
-        <View style={styles.waitingCharacterRow}>
-          <CharacterPreview characterId={selection.characterId} colorId={selection.colorId} />
-          <View style={styles.waitingDetails}>
-            <Text style={styles.waitingName}>{character.displayName}</Text>
-            <Text style={styles.waitingMeta}>{character.role} · {characterColor.label}</Text>
-            <View style={styles.positionReadout}>
-              <Text style={styles.positionLabel}>LOCKED COORDINATES</Text>
-              <Text style={styles.positionValue}>X {position?.x.toFixed(2)} m  ·  Z {position?.z.toFixed(2)} m</Text>
+          <BattleStatsPanel battleStats={battleLoadout} label="Quiz powers ready" showAbilities />
+
+          <View style={styles.waitingCharacterRow}>
+            <CharacterPreview characterId={selection.characterId} colorId={selection.colorId} />
+            <View style={styles.waitingDetails}>
+              <Text style={styles.waitingName}>{character.displayName}</Text>
+              <Text style={styles.waitingMeta}>{character.role} · {characterColor.label}</Text>
+              <View style={styles.positionReadout}>
+                <Text style={styles.positionLabel}>LOCKED COORDINATES</Text>
+                <Text style={styles.positionValue}>X {position?.x.toFixed(2)} m  ·  Z {position?.z.toFixed(2)} m</Text>
+              </View>
             </View>
           </View>
-        </View>
 
-        <View style={styles.waitingFooter}>
-          <Text accessibilityLiveRegion="polite" style={styles.organizerStatus}>Waiting for organizer…</Text>
-          <Pressable
-            accessibilityHint="Opens the participant battle preview"
-            accessibilityRole="button"
-            onPress={onStartBattle}
-            style={({ pressed }) => [styles.startButton, pressed && styles.pressed]}
-          >
-            <Text style={styles.startButtonText}>Organizer started · enter battle</Text>
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            onPress={onReturnHome}
-            style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}
-          >
-            <Text style={styles.secondaryButtonText}>Return to demo home</Text>
-          </Pressable>
-        </View>
+          <View style={styles.waitingFooter}>
+            <Text accessibilityLiveRegion="polite" style={styles.organizerStatus}>Waiting for organizer…</Text>
+            <Pressable
+              accessibilityHint="Opens the participant battle preview"
+              accessibilityRole="button"
+              onPress={onStartBattle}
+              style={({ pressed }) => [styles.startButton, pressed && styles.pressed]}
+            >
+              <Text style={styles.startButtonText}>Organizer started · enter battle</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              onPress={onReturnHome}
+              style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}
+            >
+              <Text style={styles.secondaryButtonText}>Return to demo home</Text>
+            </Pressable>
+          </View>
+        </ScrollView>
       </SafeAreaView>
     );
   }
@@ -116,11 +127,7 @@ export function ParticipantPlacementScreen({
 
   return (
     <View style={styles.screen}>
-      <ViroARSceneNavigator
-        initialScene={{ scene: CharacterPlacementScene }}
-        style={styles.arView}
-        viroAppProps={sceneBridge}
-      />
+      <ParticipantPlacementArView bridge={sceneBridge} selection={selection} />
       <SafeAreaView edges={["top", "bottom"]} pointerEvents="box-none" style={styles.overlay}>
         <View pointerEvents="box-none" style={styles.topBar}>
           <Pressable
@@ -187,7 +194,6 @@ export function ParticipantPlacementScreen({
 
 const styles = StyleSheet.create({
   screen: { backgroundColor: colors.background, flex: 1 },
-  arView: { flex: 1 },
   overlay: { ...StyleSheet.absoluteFillObject },
   topBar: { alignItems: "center", flexDirection: "row", gap: 10, paddingHorizontal: 14, paddingTop: 8 },
   cameraButton: { alignItems: "center", backgroundColor: colors.cameraScrim, borderRadius: 999, height: 48, justifyContent: "center", width: 48 },
@@ -213,7 +219,8 @@ const styles = StyleSheet.create({
   joinButtonDisabled: { backgroundColor: colors.surfaceStrong },
   joinText: { color: colors.accentInk, fontSize: 16, fontWeight: "900", textAlign: "center" },
   joinTextDisabled: { color: colors.inkMuted },
-  waitingScreen: { backgroundColor: colors.background, flex: 1, justifyContent: "space-between", paddingHorizontal: 22 },
+  waitingScreen: { backgroundColor: colors.background, flex: 1 },
+  waitingContent: { gap: 20, paddingBottom: 12, paddingHorizontal: 22 },
   waitingTop: { paddingTop: 38 },
   readyPill: { alignItems: "center", alignSelf: "flex-start", backgroundColor: "rgba(108, 229, 168, 0.13)", borderRadius: 999, flexDirection: "row", gap: 8, minHeight: 38, paddingHorizontal: 13 },
   readyDot: { backgroundColor: colors.success, borderRadius: 5, height: 10, width: 10 },

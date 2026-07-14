@@ -1,12 +1,8 @@
 import { doc, getDoc } from "firebase/firestore";
+import type { QuizResult } from "@codexwars/shared";
 import { ensureAnonymousFirebaseUser, getFirebaseServices } from "./client";
 
-export type QuizResult = {
-  displayName: string;
-  rank: number;
-  score: number;
-  shieldReward: number;
-};
+export type { QuizResult } from "@codexwars/shared";
 
 export async function readMyQuizResult(sessionId: string): Promise<QuizResult | null> {
   const firebase = getFirebaseServices();

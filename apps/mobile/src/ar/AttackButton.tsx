@@ -1,23 +1,26 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import type { WeaponId } from "@codexwars/shared";
 import { colors } from "../components/theme";
-import type { AttackId } from "./types";
 
 type AttackButtonProps = {
   accent: string;
   detail: string;
-  id: AttackId;
+  disabled?: boolean;
+  id: WeaponId;
   label: string;
-  onPress: (id: AttackId) => void;
+  onPress: (id: WeaponId) => void;
 };
 
-export function AttackButton({ accent, detail, id, label, onPress }: AttackButtonProps) {
+export function AttackButton({ accent, detail, disabled = false, id, label, onPress }: AttackButtonProps) {
   return (
     <Pressable
       accessibilityHint={`Activates ${label}`}
       accessibilityLabel={`${label}, ${detail}`}
       accessibilityRole="button"
+      accessibilityState={{ disabled }}
+      disabled={disabled}
       onPress={() => onPress(id)}
-      style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
+      style={({ pressed }) => [styles.button, disabled && styles.buttonDisabled, pressed && styles.buttonPressed]}
     >
       <View style={[styles.indicator, { backgroundColor: accent }]} />
       <Text numberOfLines={1} style={styles.label}>
@@ -45,6 +48,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceStrong,
     transform: [{ scale: 0.97 }],
   },
+  buttonDisabled: { opacity: 0.48 },
   indicator: {
     borderRadius: 4,
     height: 8,

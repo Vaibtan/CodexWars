@@ -1,14 +1,13 @@
-import { useMemo, useRef, useState, type ComponentType } from "react";
+import { useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { ViroARSceneNavigator } from "@reactvision/react-viro";
 import { colors } from "../components/theme";
 import { getCharacter, getCharacterColor } from "../features/characters/characterCatalog";
 import type { WaitingParticipant } from "../features/characters/types";
-import { AttackButton } from "./AttackButton";
 import { BattleScene } from "./scenes/BattleScene";
 import { FloorScanScene } from "./scenes/FloorScanScene";
-import type { ArFlowPhase, ArSceneBridge, ArTrackingState, AttackId } from "./types";
+import type { ArFlowPhase, ArSceneBridge, ArTrackingState } from "./types";
 
 type ArDemoScreenProps = {
   onBattleComplete: () => void;
@@ -24,13 +23,9 @@ const trackingCopy: Record<ArTrackingState, string> = {
 };
 
 export function ArDemoScreen({ onBattleComplete, onExit, waitingParticipant }: ArDemoScreenProps) {
-  const navigatorRef = useRef<InstanceType<typeof ViroARSceneNavigator> | null>(null);
   const [phase, setPhase] = useState<ArFlowPhase>("floor-scan");
   const [floorFound, setFloorFound] = useState(false);
   const [trackingState, setTrackingState] = useState<ArTrackingState>("initializing");
-  const [lastAction, setLastAction] = useState("Aim at an opponent");
-  const [fireballCharges, setFireballCharges] = useState(2);
-  const [shieldCharges, setShieldCharges] = useState(1);
 
   const sceneBridge = useMemo<ArSceneBridge>(
     () => ({
@@ -51,45 +46,22 @@ export function ArDemoScreen({ onBattleComplete, onExit, waitingParticipant }: A
     if (!waitingParticipant) {
       return;
     }
+    setTrackingState("initializing");
     setPhase("battle");
-    const arNavigator = navigatorRef.current?.arSceneNavigator as unknown as
-      | { replace: (scene: { scene: ComponentType<any> }) => void }
-      | undefined;
-    arNavigator?.replace({ scene: BattleScene });
-  };
-
-  const useAttack = (attack: AttackId) => {
-    if (attack === "fireball") {
-      if (fireballCharges === 0) {
-        setLastAction("No fireball charges remaining");
-        return;
-      }
-      setFireballCharges((charges) => charges - 1);
-      setLastAction("Fireball launched · demo only");
-      return;
-    }
-    if (attack === "shield") {
-      if (shieldCharges === 0) {
-        setLastAction("Shield already used");
-        return;
-      }
-      setShieldCharges((charges) => charges - 1);
-      setLastAction("Shield raised · demo only");
-      return;
-    }
-    setLastAction("Basic bolt fired · demo only");
   };
 
   return (
     <View style={styles.screen}>
-      <ViroARSceneNavigator
-        initialScene={{ scene: FloorScanScene }}
-        ref={(navigator) => {
-          navigatorRef.current = navigator;
-        }}
-        style={styles.arView}
-        viroAppProps={sceneBridge}
-      />
+      {phase !== "organizer-lobby" ? (
+        <ViroARSceneNavigator
+          initialScene={{ scene: phase === "battle" ? BattleScene : FloorScanScene }}
+          key={phase}
+          style={styles.arView}
+          viroAppProps={sceneBridge}
+        />
+      ) : (
+        <View style={styles.lobbyBackdrop} />
+      )}
 
       <SafeAreaView edges={["top", "bottom"]} pointerEvents="box-none" style={styles.overlay}>
         <View pointerEvents="box-none" style={styles.topBar}>
@@ -105,11 +77,18 @@ export function ArDemoScreen({ onBattleComplete, onExit, waitingParticipant }: A
             <View
               style={[
                 styles.statusDot,
-                { backgroundColor: trackingState === "normal" ? colors.success : colors.accent },
+                {
+                  backgroundColor:
+                    phase === "organizer-lobby"
+                      ? colors.inkSubtle
+                      : trackingState === "normal"
+                        ? colors.success
+                        : colors.accent,
+                },
               ]}
             />
             <Text numberOfLines={1} style={styles.statusText}>
-              {trackingCopy[trackingState]}
+              {phase === "organizer-lobby" ? "Camera paused in lobby" : trackingCopy[trackingState]}
             </Text>
           </View>
           <View style={styles.phasePill}>
@@ -226,48 +205,11 @@ export function ArDemoScreen({ onBattleComplete, onExit, waitingParticipant }: A
                 <Text style={styles.endBattleButtonText}>End battle</Text>
               </Pressable>
             </View>
-            <View pointerEvents="none" style={styles.crosshair}>
-              <View style={styles.crosshairHorizontal} />
-              <View style={styles.crosshairVertical} />
-              <View style={styles.crosshairCenter} />
-            </View>
-
-            <View style={styles.battleHud}>
-              <View style={styles.playerRow}>
-                <View style={styles.healthCopy}>
-                  <Text style={styles.healthLabel}>YOU</Text>
-                  <Text style={styles.healthValue}>100 HP · 20 shield</Text>
-                </View>
-                <Text accessibilityLiveRegion="polite" style={styles.actionState}>
-                  {lastAction}
-                </Text>
-              </View>
-              <View style={styles.healthTrack}>
-                <View style={styles.healthFill} />
-              </View>
-              <View style={styles.attackRow}>
-                <AttackButton
-                  accent={colors.accent}
-                  detail="Unlimited"
-                  id="bolt"
-                  label="Bolt"
-                  onPress={useAttack}
-                />
-                <AttackButton
-                  accent={colors.fire}
-                  detail={`${fireballCharges} charges`}
-                  id="fireball"
-                  label="Fireball"
-                  onPress={useAttack}
-                />
-                <AttackButton
-                  accent={colors.success}
-                  detail={`${shieldCharges} charge`}
-                  id="shield"
-                  label="Shield"
-                  onPress={useAttack}
-                />
-              </View>
+            <View style={styles.organizerRoster}>
+              <Text style={styles.organizerRosterTitle}>Live standings preview</Text>
+              <Text style={styles.organizerRosterRow}>Mira · 72 HP</Text>
+              <Text style={styles.organizerRosterRow}>You · 41 HP</Text>
+              <Text style={styles.organizerRosterRow}>Theo · eliminated</Text>
             </View>
           </View>
         )}
@@ -279,6 +221,7 @@ export function ArDemoScreen({ onBattleComplete, onExit, waitingParticipant }: A
 const styles = StyleSheet.create({
   screen: { backgroundColor: colors.background, flex: 1 },
   arView: { flex: 1 },
+  lobbyBackdrop: { backgroundColor: colors.background, flex: 1 },
   overlay: { ...StyleSheet.absoluteFillObject, justifyContent: "space-between" },
   topBar: {
     alignItems: "center",
@@ -348,6 +291,9 @@ const styles = StyleSheet.create({
   organizerBattleDetail: { color: colors.inkMuted, fontSize: 12, marginTop: 3 },
   endBattleButton: { alignItems: "center", borderColor: colors.danger, borderRadius: 12, borderWidth: 1, justifyContent: "center", minHeight: 48, paddingHorizontal: 14 },
   endBattleButtonText: { color: colors.ink, fontSize: 13, fontWeight: "800" },
+  organizerRoster: { backgroundColor: colors.cameraScrim, gap: 8, margin: 14, padding: 16 },
+  organizerRosterTitle: { color: colors.ink, fontSize: 16, fontWeight: "900", marginBottom: 2 },
+  organizerRosterRow: { color: colors.inkMuted, fontSize: 14, fontWeight: "700" },
   organizerLobby: { flex: 1, justifyContent: "flex-end", padding: 14 },
   lobbyPanel: { backgroundColor: colors.cameraScrim, borderRadius: 16, padding: 17 },
   lobbyHeadingRow: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
@@ -361,17 +307,5 @@ const styles = StyleSheet.create({
   lobbyPlayerDetail: { color: colors.inkSubtle, fontSize: 11, marginTop: 3 },
   lobbyPlayerState: { color: colors.success, fontSize: 10, fontWeight: "900", letterSpacing: 0.6 },
   lobbyPlayerStatePending: { color: colors.accent },
-  crosshair: { alignSelf: "center", height: 54, position: "absolute", top: "43%", width: 54 },
-  crosshairHorizontal: { backgroundColor: colors.ink, height: 2, left: 0, position: "absolute", right: 0, top: 26 },
-  crosshairVertical: { backgroundColor: colors.ink, bottom: 0, left: 26, position: "absolute", top: 0, width: 2 },
-  crosshairCenter: { alignSelf: "center", backgroundColor: colors.accent, borderRadius: 5, height: 10, marginTop: 22, width: 10 },
-  battleHud: { backgroundColor: colors.cameraScrim, paddingBottom: 10, paddingHorizontal: 14, paddingTop: 14 },
-  playerRow: { alignItems: "flex-end", flexDirection: "row", justifyContent: "space-between" },
-  healthCopy: { flexShrink: 0 },
   healthLabel: { color: colors.inkSubtle, fontSize: 11, fontWeight: "800", letterSpacing: 0.8 },
-  healthValue: { color: colors.ink, fontSize: 15, fontWeight: "800", marginTop: 2 },
-  actionState: { color: colors.inkMuted, flex: 1, fontSize: 11, marginLeft: 12, textAlign: "right" },
-  healthTrack: { backgroundColor: colors.surfaceStrong, borderRadius: 4, height: 7, marginTop: 9, overflow: "hidden" },
-  healthFill: { backgroundColor: colors.success, borderRadius: 4, height: 7, width: "84%" },
-  attackRow: { flexDirection: "row", gap: 9, marginTop: 13 },
 });

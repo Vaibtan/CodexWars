@@ -23,6 +23,7 @@ const initialSelection: CharacterSelection = {
   characterId: "knight",
   colorId: "gold",
 };
+const demoCorrectAnswers = 7;
 
 export default function App() {
   const [screen, setScreen] = useState<AppScreen>("home");
@@ -57,6 +58,7 @@ export default function App() {
       )}
       {screen === "participant-placement" && (
         <ParticipantPlacementScreen
+          correctAnswers={demoCorrectAnswers}
           onBack={() => setScreen("character-customization")}
           onReady={setWaitingParticipant}
           onReturnHome={() => setScreen("home")}
@@ -66,6 +68,7 @@ export default function App() {
       )}
       {screen === "participant-battle" && (
         <ParticipantBattleScreen
+          correctAnswers={demoCorrectAnswers}
           onBattleComplete={() => setScreen("participant-results")}
           selection={selection}
         />

@@ -4,10 +4,10 @@ import {
   type DocumentData,
   type Firestore,
 } from "firebase-admin/firestore";
+import type { QuizResult } from "@codexwars/shared";
 import type {
   QuizAnswer,
   QuizQuestion,
-  QuizResult,
   QuizSession,
   QuizTemplate,
 } from "./types.js";

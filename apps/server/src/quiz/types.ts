@@ -34,10 +34,3 @@ export type QuizAnswer = {
   questionId: string;
   optionId: string;
 };
-
-export type QuizResult = {
-  displayName: string;
-  rank: number;
-  score: number;
-  shieldReward: number;
-};
