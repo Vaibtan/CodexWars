@@ -1,41 +1,31 @@
 # CodexWars — GLB Character and AR Implementation Specification
 
-**Status:** Implementation specification  
-**Companions:** [`../PRD.md`](../PRD.md), [`../BUILD_SPEC.md`](../BUILD_SPEC.md), [`../ARCHITECTURE.md`](../ARCHITECTURE.md)  
-**Scope:** M0 marker-colocation spike through P1 selectable GLB characters  
+**Status:** Authoritative AR/device and GLB contract
+**Companions:** [`../PRD.md`](../PRD.md), [`../BUILD_SPEC.md`](../BUILD_SPEC.md), [`../ARCHITECTURE.md`](../ARCHITECTURE.md), [`../API_AND_REALTIME_SPEC.md`](../API_AND_REALTIME_SPEC.md)
+**Scope:** M0 marker-colocation spike through P1 selectable GLB characters
 **Last updated:** 2026-07-14
 
 ## 1. Purpose and scope
 
-This document specifies how CodexWars renders customizable GLB characters in its React Native AR experience while preserving the game's core rule: **AR is presentation; the server owns the 2D game.**
-
-The PRD establishes the following constraints:
-
-- Every player scans the same printed, asymmetric floor image marker. That marker is the shared arena origin.
-- Players lock a stationary marker-relative position before battle. They rotate to aim but do not walk during combat.
-- The server receives only marker-relative X/Z positions and a normalized aim direction when an attack is fired. It computes hits, shields, HP, eliminations, and winners.
-- Camera frames never leave the device. There is no face/body recognition.
-- P0 renders one bundled default GLB avatar after M0 proves Android-to-iPhone marker colocation. Character choice and three additional selectable GLB cosmetics are P1 work, after M1 proves the complete battle loop.
-
-Therefore, a GLB is never a source of gameplay truth. It is a local visual representation of a server-owned `characterId` at a server-owned arena position.
+This document owns marker acquisition, marker-space pose conversion, pose freshness, AR lifecycle, GLB asset constraints, and local rendering. Product rules, server authority, and wire payloads stay in their companion documents. A GLB is presentation of server-owned state, never gameplay truth.
 
 ## 2. Technology decisions
 
 | Concern | Decision | Reason |
 |---|---|---|
-| React Native AR bridge | `@reactvision/react-viro` 2.57.4 | The pinned stack in `BUILD_SPEC.md`; exposes ARKit on iOS and ARCore on Android behind one React Native API. |
+| React Native AR bridge | The `@reactvision/react-viro` version pinned in `BUILD_SPEC.md` | Exposes ARKit and ARCore behind one React Native boundary. |
 | iOS tracking | ARKit, via Viro | ARKit owns camera tracking and image-marker recognition on iPhone. Do not create a parallel direct ARKit integration. |
 | Android tracking | ARCore, via Viro | The same `ArenaSession` must work on mixed-platform rooms. |
 | Shared origin | `ViroARImageMarker` and the bundled physical arena image | The PRD's deliberate replacement for cloud anchors. |
 | 3D format | Binary glTF (`.glb`) | One portable asset file containing meshes, materials, skeleton, animations, and optionally morph targets. |
 | Renderer boundary | `apps/mobile/src/ar/` only | No screen, store, network module, or server module may import Viro. |
-| Character configuration | Server-synced `characterId` plus a versioned client manifest | All clients render the same selected character without putting asset URLs or AR transforms into combat messages. |
+| Character configuration | Server-synced `characterId` plus a versioned client manifest | All clients render the same approved character without putting asset URLs or transforms into combat messages. |
 
 ### 2.1 Expo constraint
 
 Viro is native code. The mobile app must run in an installed Expo development build or production build; it cannot run inside Expo Go. Any native dependency or Viro config-plugin change requires rebuilding Android and creating a new iOS EAS development/TestFlight build.
 
-The checked-in baseline is Expo 57.0.4 / React Native 0.86.0. Viro's declared peer range includes this pair, but only a successful M0 development build on both physical platforms proves it for CodexWars.
+The checked-in Expo/React Native versions are owned by `BUILD_SPEC.md`. Only a successful M0 development build on both physical platforms proves the pinned combination for CodexWars.
 
 ## 3. Game-aligned behavior
 
@@ -60,13 +50,13 @@ sequenceDiagram
     S-->>C: State sync: every player's position, HP, shield, characterId
     C->>AR: Render each opponent's GLB at their marker-relative position
     P->>C: Press fire
-    C->>S: attack {weapon, dirX, dirZ, predictedTargetId?}
+    C->>S: attack command defined by API spec
     S->>S: Authoritative 2D ray-vs-circle resolution
-    S-->>C: attack_resolved / state sync
+    S-->>C: authoritative result / state sync
     C->>AR: Play local projectile/hit/elimination visual
 ```
 
-`select_character` is accepted only before the room enters `positioning` (recommended) or before `countdown` (permissible if UI requires it). Once countdown begins, the server freezes `characterId` for the match. This prevents late asset loads and ensures the organizer/minimap sees stable player identity.
+`select_character` is accepted only during `lobby`, `quiz`, or `localization`. Entering `positioning` freezes `characterId` for the round, preventing late asset loads and keeping player identity stable.
 
 ### 3.2 Same character on every phone
 
@@ -135,37 +125,12 @@ Use texture compression and mesh compression only after confirming Viro's suppor
 
 ## 5. Repository design
 
-The design extends the layout in `BUILD_SPEC.md` without violating its AR boundary:
+The repository layout is owned by `BUILD_SPEC.md`. The AR-specific rules are:
 
-```text
-apps/mobile/
-├── assets/
-│   └── characters/
-│       ├── default/default.glb
-│       ├── ember/ember.glb
-│       ├── moss/moss.glb
-│       └── nova/nova.glb
-└── src/
-    ├── ar/
-    │   ├── ArenaSession.tsx        # only Viro importer; scene composition
-    │   ├── Avatar.tsx              # Viro3DObject wrapper and cosmetic props
-    │   ├── characterCatalog.ts     # manifest and pure ID lookup
-    │   ├── coordinates.ts           # marker-space math; no GLB knowledge
-    │   └── types.ts                 # ArSessionState / ArPose contract
-    ├── components/
-    │   └── CharacterPicker.tsx      # normal React Native UI, no Viro import
-    ├── store/
-    │   └── sessionStore.ts
-    └── net/
-        └── warRoomClient.ts
-
-packages/shared/src/
-├── types.ts                         # CharacterId on PlayerState
-└── protocol.ts                      # select_character command
-
-apps/server/src/
-└── WarRoom.ts                        # validates/freezes character selection
-```
+- Viro scene composition, avatar rendering, the client manifest, coordinate math, and AR types stay under `apps/mobile/src/ar/`.
+- Ordinary React Native pickers/HUD components consume plain props and do not import Viro.
+- `apps/mobile/src/lib/warRoomClient.ts` is the network boundary and never imports Viro types.
+- Shared/server modules know approved character IDs but never import GLBs, Viro, or mobile asset handles.
 
 `Avatar.tsx` is part of the AR implementation, but it cannot calculate attacks, mutate HP, or send network messages. It receives plain render props: `characterId`, position, facing, HP/shield presentation state, and visual event queue.
 
@@ -205,12 +170,11 @@ The server must not accept `glbUrl`, mesh customization, a transform, a scale, a
 
 ### 6.3 Cosmetic customization
 
-P1's safe customization is a constrained `CharacterAppearance` record, such as palette IDs and optional accessory IDs, validated against a catalog. It is synchronized beside `characterId` and used only by `Avatar.tsx`.
+P1's customization is a constrained palette ID validated against the approved manifest. It is synchronized beside `characterId` and used only by `Avatar.tsx`.
 
 ```ts
 interface CharacterAppearance {
-  outfitColorId: "blue" | "gold" | "purple";
-  accessoryId?: "visor" | "cape";
+  paletteId: "default" | "blue" | "gold" | "purple";
 }
 ```
 
@@ -275,38 +239,20 @@ function Avatar({ player, visualEvent }: AvatarProps) {
 
 This example intentionally omits networking, coordinate conversion, attack resolution, and unvalidated remote URLs: those do not belong in the avatar component.
 
-## 8. Effects, aiming, and collision
+## 8. Effects and aiming
 
-Visual GLB projectiles may be used, but projectile motion is an animation of an already-authoritative event.
+- Fire uses only a fresh normalized floor-projected aim produced by the AR adapter; otherwise the UI disables fire with an “aim level” or re-scan cue.
+- The network command and server resolution are defined only in `API_AND_REALTIME_SPEC.md`.
+- Bolt, hit, and elimination visuals react to authoritative events/state. A local predicted target may affect highlighting only.
+- Meshes, bones, GLB bounds, avatar height, ARKit raycasts, and visual projectile paths never affect collision.
 
-1. Player presses the basic-bolt button.
-2. Client projects the latest marker-relative camera-forward vector onto the X/Z floor plane, normalizes it, and sends the existing `attack` command. Vertical pitch is discarded, so aiming above or below a player's rendered head has no gameplay effect when the floor-plane direction is unchanged.
-3. Server performs the PRD's nearest ray-vs-circle test using canonical `PLAYER_HIT_RADIUS_M` and weapon ray width.
-4. Server broadcasts the result.
-5. Clients draw a bolt/flash toward the server-confirmed target position (or a short miss effect for `targetId: null`).
+## 9. Conformance requirements
 
-No character mesh collider, bone collider, GLB bounding box, avatar height, or ARKit raycast result can change whether an attack hits. The server considers only the floor-plane ray, canonical player circle, weapon radius, and range; it selects the nearest eligible circle. This keeps mixed-device matches deterministic despite image-marker jitter and different client asset detail.
-
-If floor projection produces a vector below `AIM.MIN_HORIZONTAL_MAGNITUDE`, the client disables fire with an "aim level" cue and sends no attack. This is the only camera-pitch constraint; it is not a mesh or screen-space target check.
-
-## 9. Delivery plan and acceptance criteria
-
-| Milestone | GLB/AR work | Exit criterion |
-|---|---|---|
-| M0 | No character work required; marker scene may use a simple diagnostic primitive | Android and iPhone meet the marker acquisition, agreement, drift, and tracking-loss thresholds in `BUILD_SPEC.md`. |
-| M1 / P0 | Render the bundled default GLB; validate AR boundary, coordinate conversion, and full battle on 3–4 devices | The four PRD demo success criteria pass twice in a row. |
-| M2 / P1 | Add three bundled cosmetic GLBs, picker, catalog validation, preloading, hit/elimination animations, and performance instrumentation | All P1 GLBs load on an ARKit iPhone and ARCore Android; 12-avatar worst case sustains ≥30 FPS; no gameplay test changes across GLB cosmetics. |
-| P2 | Consider approved remote catalog/versioning and richer cosmetics | Offline/demo fallback still works with bundled assets; asset failure has a visible fallback, not a broken battle screen. |
-
-Required tests:
-
-- Unit-test catalog ID validation and fallback behavior.
-- Unit-test coordinate conversions independently of Viro.
-- Unit-test pose freshness so tracked/inertial poses may fire and stale/unavailable poses may not.
-- Server integration-test phase gates and rejection of invalid `select_character` IDs.
-- Regression-test combat with different `characterId` values and prove identical damage/winner outcomes.
-- Device-test marker reacquisition, GLB asset loading, animation playback, 3–4 real devices, then 12 simulated/real render load as available.
-- Test ARKit and ARCore separately for marker scale/orientation, asset load failures, and tracking-loss behavior.
+- Unit-test catalog validation, coordinate conversion, and pose freshness independently of Viro.
+- Device-test marker scale/orientation, acquisition, reacquisition, drift, and tracking loss on the designated Android and iPhone.
+- Verify the P0 default GLB and every enabled P1 GLB load and animate on both platforms within the asset/performance budgets.
+- Prove character choice and visual asset failure do not change server damage, elimination, or winner results.
+- Prove stale/unavailable poses emit no attack and authoritative events alone drive persistent hit/elimination effects.
 
 ## 10. Explicit non-goals
 
@@ -315,14 +261,3 @@ Required tests:
 - Full 3D physics or GLB-driven hitboxes.
 - User-uploaded/unreviewed models in P1.
 - Character choices that give combat advantages before the PRD's future loadout-economy work is designed and approved.
-
-## 11. Implementation checklist
-
-1. Complete M0 before rendering the P0 default GLB; M0 itself uses diagnostic primitives only.
-2. Add `CharacterId` and default selection to shared/server schema; test phase-gated selection.
-3. Add the bundled GLB catalog and Metro asset configuration; verify native dev builds on both platforms.
-4. Implement `Avatar.tsx` exclusively inside `src/ar/`, rendering the bundled default GLB and only a recoverable placeholder on local asset failure.
-5. Preload the selected character before positioning; block readiness with a recoverable asset-error message if it cannot load.
-6. Connect authoritative combat events to visual animation/effect queues only after server broadcast.
-7. Profile 3–4 devices in a real room, then enforce the M2 performance budget.
-8. Update `M0_RESULTS.md` / milestone evidence and only then enable the default GLB in the production demo flow.

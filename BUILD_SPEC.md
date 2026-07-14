@@ -1,9 +1,11 @@
 # CodexWars — Build Specification
 
-**Version:** 1.3
-**Companion to:** `PRD.md` v2.3 (product requirements; decision log in §2 there)
+**Version:** 1.4
+**Companion to:** `PRD.md` v2.4 (product requirements; decision log in §2 there)
 **Scope:** M0 (cross-platform colocation spike) through M2 (hardened P1). Product work is sketched only.
 **Last updated:** 2026-07-14 — all package versions below verified against the npm registry on this date.
+
+**Document responsibility:** this file owns dependency pins, environment setup, repository shape, test layers, and milestone order. Product rules live in `PRD.md`; structural invariants in `ARCHITECTURE.md`; the exact P0 network contract in `API_AND_REALTIME_SPEC.md`; and device/GLB details in `docs/AR_IMPLEMENTATION_SPEC.md`.
 
 ---
 
@@ -33,7 +35,7 @@ Versions verified on npm, 2026-07-14:
 | `@reactvision/react-viro` | **2.57.4** | AR rendering + image markers | Peer range: Expo ≥55 <58, RN ≥0.83 <0.87 — the checked-in SDK 57 / RN 0.86 pair fits. Requires a **development build** (`expo prebuild` / dev client); Expo Go cannot load it. |
 | `colyseus` | **0.17.10** | Authoritative game server | 0.17 line: `defineServer()`, auto-reconnection, `onDrop`/`onReconnect` hooks. |
 | `@colyseus/sdk` | **0.17.43** | Mobile client for Colyseus | Official 0.17 client SDK. Pin and verify this exact pair with the 0.17.10 server in the first networking spike. |
-| `zustand` | **5.0.x, exact version selected at installation** | Client UI state | Small, no boilerplate; replace this placeholder with the exact installed version before M1. |
+| `zustand` | **5.0.12** | Client UI state | Standard `zustand` package; core `create`/`createStore` usage needs no React Native-specific adapter. |
 | `typescript` | **6.0.3 workspace-wide** | Everything | Strict mode on; one compiler version for mobile, server, and shared contracts. It passes after aligning `@types/react` with Expo SDK 57. |
 | Node.js | **22.23.1** | Server + tooling runtime | Pin the same version in `.nvmrc`, `engines`, CI, and EAS profiles. |
 
@@ -150,36 +152,12 @@ Run it on **one Android and one iPhone simultaneously**. No server is needed —
 
 ## 6. System architecture
 
-> Deeper design — deployment view, runtime sequence diagrams, state machines, coordinate/data ownership, and invariants — lives in `ARCHITECTURE.md`. This section is the working summary.
+`ARCHITECTURE.md` is the authority for deployment, components, runtime sequences, state machines, and ownership. The build must preserve these import boundaries:
 
-```mermaid
-flowchart LR
-    subgraph Phone["Each phone (Expo app)"]
-        SCREENS["Screens + HUD<br/>(React Native)"]
-        STORE["zustand stores"]
-        ARM["ar/ module<br/>(only Viro importer)"]
-        NETC["lib/warRoomClient<br/>(@colyseus/sdk adapter)"]
-        SCREENS --> STORE
-        ARM --> STORE
-        STORE --> NETC
-        NETC --> STORE
-    end
-
-    subgraph Laptop["Windows laptop (LAN/hotspot)"]
-        SRV["Colyseus WarRoom<br/>phase machine · validation<br/>hit detection · results"]
-    end
-
-    SHARED["@codexwars/shared<br/>types · protocol · constants<br/>combat · geometry · rewards"]
-
-    NETC <-->|"WebSocket"| SRV
-    SHARED -.compile-time.-> Phone
-    SHARED -.compile-time.-> SRV
-```
-
-Data-flow rules:
-- The **ar/ module** publishes into the store: `localizationState`, and (while in battle) the camera's marker-space position + floor-projected forward direction at ~10 Hz. It reads from the store: opponent positions/HP to render. It never talks to the network directly.
-- The **multiplayer adapter** (`lib/warRoomClient.ts`) owns Colyseus matchmaking, room connection, reconnection, and message (de)serialization. It is the only mobile file that imports `@colyseus/sdk` and never touches Viro types.
-- **Attacks:** button press → read latest aim from store → `attack` message → server resolves → `attack_resolved` broadcast → store update → HUD + AR effects react.
+- only `apps/mobile/src/ar/` imports Viro;
+- only `apps/mobile/src/lib/warRoomClient.ts` imports `@colyseus/sdk`;
+- `apps/server` imports no mobile or AR code; and
+- `packages/shared` contains platform-neutral protocol, validation, and pure game logic.
 
 ---
 
@@ -222,54 +200,15 @@ export const AIM = {
 } as const;
 ```
 
-### 7.2 Protocol (all messages typed in one file)
+### 7.2 Protocol ownership
 
-Room creation and joining are **connection lifecycle operations**, not in-room messages. The organizer uses the Colyseus create flow for room type `war`; `WarRoom.onCreate` allocates a unique four-digit `roomId`, which is the public code. Participants resolve that code with the SDK join-by-ID flow. `onCreate`/`onJoin` assign the server-owned organizer/participant roles before any command below is accepted.
-
-| Direction | Message | Payload |
-|---|---|---|
-| Organizer→S | `set_combat_included` | `{ playerId, included }` — quiz-only players remain in the room but are excluded from battle readiness |
-| Organizer→S | `configure_arena` | `{ radiusM }` |
-| Organizer→S | `select_quiz_template` | `{ templateId: "programming-fundamentals-v1", sessionName?: string }` |
-| Organizer→S | `start_quiz` | `{}` — freezes the participant cohort and starts the server clock |
-| C→S | `quiz_answer` | `{ questionId, optionId }` — exactly one answer before the authoritative deadline |
-| C→S | `localization_changed` | `{ state: "searching" \| "localized" \| "lost" }` |
-| C→S | `lock_position` | `{ x, z }` (marker-relative metres) |
-| C→S | `unlock_position` | `{}` |
-| C→S | `ready_changed` | `{ ready }` |
-| Organizer→S | `start_battle` | `{}` |
-| C→S | `attack` | `{ roundId, commandId, weapon, dirX, dirZ, predictedTargetId? }` — resolved once at server receipt; predicted target is **diagnostics only**, never trusted |
-| S→C | `attack_resolved` | `{ roundId, eventSequence, commandId, attackerId, targetId \| null, damage, targetShield, targetHp }` |
-| S→C | `player_eliminated` | `{ roundId, eventSequence, playerId }` |
-| S→C | `battle_completed` | `{ roundId, eventSequence, winnerId, standings }` |
-| S→C | `error` | `{ code, message, details? }`; position errors include `{ correction: { x, z }, distanceM }` so the UI can provide directional guidance |
-
-Continuous state (player list, combat inclusion, phases, HP, positions, `roundId`, `startsAt`, `serverNow`, and public quiz state) flows through Colyseus **state sync**, not messages; messages are for discrete commands/events only. Clients calculate a server-time offset from the latest `serverNow` before rendering the countdown and quiz timers. Authoritative events carry a monotonically increasing per-round `eventSequence`; clients ignore an older round or a sequence already applied. This keeps LAN traffic tiny (PRD §9 reliability).
-
-### 7.3 Core types
-The organizer is a separate non-combat room member in P0. `PlayerState` represents participants only and includes `combatIncluded: boolean` (default true); quiz-only players still count toward `MAX_PARTICIPANTS` but are excluded from positioning and start gating. `RoomState` keeps phases `lobby → quiz → localization → positioning → countdown → battle → results`, and includes `roundId`, `eventSequence`, and `serverNow` for ordering/time alignment. `QuizState` includes `templateId`, `status`, `questionIndex`, a public current-question projection, `questionEndsAt`, and `revealEndsAt`; answer keys stay server-private until the reveal. `ArenaState` is `{ radiusM, status }` — no `cloudAnchorId`; the marker needs no server-side identity.
+`API_AND_REALTIME_SPEC.md` is the only prose definition of P0 admission, Schema state, commands, events, errors, timing, ordering, and reconnect behavior. Implement those definitions once in shared runtime validators/types; mobile and server import them rather than maintaining parallel payload shapes.
 
 ---
 
 ## 8. Server design (`apps/server`)
 
-### 8.1 Room lifecycle
-- One Colyseus room class `WarRoom` per battle session. `WarRoom.onCreate` allocates a unique four-digit custom `roomId` through Colyseus Presence; the public room code and transport room ID are the same identifier, so no pass-through code→room registry exists. Release the ID in `onDispose` and expire the room after two hours of inactivity.
-- The creating connection becomes the server-owned, non-combat organizer. Organizer commands check that role on every call. If the organizer drops before countdown, the phase remains unchanged and organizer-only commands are unavailable for `HOST_RECONNECT_GRACE_MS`; expiry closes the room. Once countdown/battle starts, server timers and combat continue while organizer controls remain unavailable until reconnection.
-- **Reconnection:** use Colyseus 0.17 `onDrop`/`onReconnect` — a dropped participant keeps their `PlayerState` for `DISCONNECT_ELIMINATION_MS` during battle (then auto-eliminated) and indefinitely pre-battle (organizer can remove).
-
-### 8.2 Phase machine
-Same machine as v1 (§18 of the draft). Every message handler follows: **phase gate → role/authority check → payload validation → gameplay invariant validation → state mutation → sync/broadcast**. For example, `lock_position` is only legal in `positioning`, and `attack` only in `battle` after `startsAt`. Illegal commands get typed `error` responses, never crashes.
-
-**Start invariant** (server-enforced): every combat-included participant is `connected && localized && quizCompleted && position != null && ready`. Quiz-only participants never block the start. Countdown emits `startsAt = now + COUNTDOWN_MS` plus `serverNow`; clients render from their calculated server-time offset.
-
-### 8.3 Combat resolution
-The ray-vs-circle nearest-target algorithm and shield-before-HP damage order from the v1 draft (§15) carry over **verbatim** — they live in `packages/shared/src/combat.ts` as pure functions; `WarRoom` just calls them. Server-side validation before resolution: current `roundId`, unseen per-client `commandId`, attacker alive, phase is battle, `now ≥ startsAt`, cooldown elapsed (`nextAttackAt`), charges available, direction vector normalizable. P0 resolves attacks at server receipt; it has no client-clock lag compensation.
-
-Match end: last-alive, or timer (server `setTimeout` anchored to `startsAt + DURATION_MS`) → highest HP → quiz score tiebreak. Results broadcast once. Organizer reset retains connected identities/nicknames/roles only, increments `roundId`, and clears quiz state/rewards, localization, positions, readiness, combat state, command deduplication, and per-round `eventSequence`.
-
-### 8.4 What the server never does
-No AR concepts, no camera data, no trust in client-computed hits, no persistence (in-memory only through M2).
+Implement one `WarRoom` orchestration boundary around pure shared quiz, reward, geometry, and combat functions. `ARCHITECTURE.md` owns its structural responsibilities and invariants; `API_AND_REALTIME_SPEC.md` owns every external and synchronized behavior. The server runtime remains in-memory through M2 and must not import the deferred Firebase scaffold.
 
 ---
 
@@ -282,38 +221,9 @@ No AR concepts, no camera data, no trust in client-computed hits, no persistence
 ### 9.2 Screens (React Navigation, ~10)
 Home → Create/Join → Lobby (organizer variant selects and starts the fixed quiz, then shows minimap + phase controls) → Quiz → shield reward summary → Marker scan (guided) → Position lock → Battle (AR view + HUD) → Results. P0 renders one bundled default GLB avatar. Eliminated players stay on Battle behind a non-interactive eliminated overlay with live standings; free spectator navigation is P1. Screens are deliberately thin — logic lives in stores/shared.
 
-### 9.3 The AR contract (only Viro importer)
+### 9.3 AR and battle presentation
 
-```ts
-// apps/mobile/src/ar/types.ts — everything outside ar/ codes against this
-export type ArSessionState =
-  | { status: "initializing" }
-  | { status: "searching" }                       // looking for marker
-  | { status: "localized"; sinceTs: number }
-  | { status: "degraded"; sinceTs: number }        // fresh inertial pose; warn
-  | { status: "tracking_lost"; lastPoseTs: number }; // no fresh pose; re-scan
-
-export interface ArPose {
-  position: { x: number; z: number };              // marker-space, metres
-  aimDir: { x: number; z: number };                // forward projected to floor, normalized
-  observedAt: number;
-  quality: "tracked" | "inertial";
-}
-```
-
-`ArenaSession.tsx` (Viro scene) responsibilities: track the marker → capture `T_marker` → convert camera pose each frame via `coordinates.ts` → publish timestamped `ArPose` to `battleStore` at 10 Hz → render opponents (bundled GLB + name + HP bar at each opponent's marker-space position), boundary ring, and pooled attack/hit effects. The aim calculation projects camera forward onto X/Z before sending; avatar height, mesh, and bones never affect a hit. Marker visibility and pose usability are distinct: a fresh inertial pose may continue, but the HUD disables firing when `now - observedAt > AIM.POSE_STALE_MS` or no normalized aim exists.
-
-`coordinates.ts` is pure math, ported from v1 §14 with the marker as origin:
-- **Lock position:** `p_camera_marker = inverse(T_marker) × p_camera_local` → store `(x, z)`.
-- **Aim:** rotate camera forward into marker space, project to floor, normalize.
-- **Render opponent:** `T_marker × [opp.x, AVATAR_HEIGHT_M, opp.z]`.
-Unit-tested against hand-computed fixtures (identity, translated, rotated marker poses) before ever running on a device.
-
-### 9.4 Battle HUD
-Crosshair (center) with locked/unlocked states + target name/HP (never color-only — shape + label, PRD accessibility); fire buttons with radial cooldown; my HP/shield bar; timer; kill feed. High-contrast scrimmed panels over the camera. Sound + haptics (`expo-haptics`) on fire/hit/eliminated.
-
-### 9.5 Camera/thermal discipline (PRD D4)
-The AR session mounts only on the Marker-scan, Position-lock, and Battle screens and fully unmounts elsewhere. Target: ≤3 min camera-on per session.
+`docs/AR_IMPLEMENTATION_SPEC.md` exclusively defines the AR adapter, coordinate conversion, pose freshness, GLB rendering, HUD/effect authority, and camera lifecycle. Mobile screens consume that adapter and the realtime client; they do not reproduce either contract.
 
 ---
 
@@ -321,10 +231,10 @@ The AR session mounts only on the Marker-scan, Position-lock, and Battle screens
 
 | Layer | Tool | What | Devices needed |
 |---|---|---|---|
-| Unit | vitest in `shared/` | geometry, combat (including aligned targets, boundary, spacing, shield order, and quiz-score tiebreaks), rewards, coordinate fixtures | none |
-| Integration | `@colyseus/testing` in `server/` | matchmaking create/join-by-ID; organizer authorization; full-room/dup-names; quiz-only participant capacity; structured position errors; shield rewards; start invariant; command deduplication/event ordering; elimination→winner; reconnect-reattach; disconnect-timeout elimination; organizer-drop policy | none |
-| Device — AR | manual protocol | M0 metrics re-run per marker/OS change on Android and iOS | one Android + one iPhone |
-| Device — E2E | scripted manual runs | M1 demo twice on 3–4 mixed-platform devices; fresh-inertial vs stale pose; organizer/participant reconnect; server restart produces explicit session-ended UX | at least one Android + one iPhone |
+| Unit | vitest in `shared/` | Pure domain and coordinate conformance | none |
+| Integration | `@colyseus/testing` in `server/` | `API_AND_REALTIME_SPEC.md` conformance | none |
+| Device — AR | manual protocol | M0 and AR-spec conformance | one Android + one iPhone |
+| Device — E2E | scripted manual runs | PRD M1 success criteria, twice | at least one Android + one iPhone |
 
 CI (GitHub Actions): typecheck + unit + integration on every push. Device tests are checklists in the repo (`docs/device-test.md`), run before each milestone exit.
 

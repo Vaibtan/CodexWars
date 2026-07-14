@@ -3,6 +3,24 @@
 React Native multiplayer AR battle game. The app is organized as an npm
 workspace so mobile, server, and shared game contracts can evolve separately.
 
+## Specification map
+
+Each decision has one authoritative home:
+
+| Document | Owns |
+|---|---|
+| [`PRD.md`](PRD.md) | Product outcomes, roles, game rules, scope, and acceptance criteria |
+| [`BUILD_SPEC.md`](BUILD_SPEC.md) | Pinned stack, development environment, repository shape, and milestone order |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | Component boundaries, runtime flows, state ownership, and invariants |
+| [`API_AND_REALTIME_SPEC.md`](API_AND_REALTIME_SPEC.md) | Exact P0 admission, synchronized state, commands, events, errors, and reconnect contract |
+| [`docs/AR_IMPLEMENTATION_SPEC.md`](docs/AR_IMPLEMENTATION_SPEC.md) | Marker/pose adapter and GLB rendering/asset contract |
+
+Supporting research and testing guides are evidence or procedure, not competing
+sources of truth. The material under `docs/archive/` is historical only.
+
+Backend implementation work is sequenced in the
+[`P0 backend checklist`](docs/BACKEND_IMPLEMENTATION_CHECKLIST.md).
+
 ```text
 apps/
   mobile/             Expo / React Native client

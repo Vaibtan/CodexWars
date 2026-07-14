@@ -1,7 +1,7 @@
 # CodexWars — Architecture Design
 
-**Version:** 1.1
-**Companions:** `PRD.md` v2.3 (what & why) · `BUILD_SPEC.md` v1.3 (stack, repo layout, build order)
+**Version:** 1.2
+**Companions:** `PRD.md` v2.4 (what & why) · `BUILD_SPEC.md` v1.4 (stack, repo layout, build order) · `API_AND_REALTIME_SPEC.md` v1.2 (exact P0 interface contract)
 **This document:** the structural and runtime design — components, deployment, critical sequences, state machines, and invariants. Diagrams here are the reference during implementation; if code and this doc disagree, fix one of them in the same commit.
 
 ---
@@ -168,12 +168,12 @@ sequenceDiagram
     HUD->>B: fire pressed
     B->>B: read latest aimDir; run shared resolveAttack for prediction
     Note over B: project camera forward onto X/Z; discard vertical pitch
-    B->>N: attack {roundId, commandId, weapon, dirX, dirZ, predictedTargetId}
+    B->>N: attack command
     N->>SRV: forward
     SRV->>SRV: validate at server receipt: role/round/unseen command,<br/>phase=battle, now≥startsAt, alive, cooldown, charges, |dir|≈1
     SRV->>SRV: resolveAttack(attacker, dir, weapon, players)  ← shared/combat.ts
     SRV->>SRV: applyDamage: shield → HP → clamp → eliminated?
-    SRV->>ALL: attack_resolved {roundId, eventSequence, commandId,<br/>attackerId, targetId|null, damage, targetShield, targetHp}
+    SRV->>ALL: authoritative attack result + state patch
     opt target reached 0 HP
         SRV->>ALL: player_eliminated {playerId}
         SRV->>SRV: checkWinner → maybe battle_completed
@@ -240,9 +240,9 @@ Organizer drops follow a different policy: before countdown, the phase stays unc
 ```mermaid
 stateDiagram-v2
     [*] --> lobby: matchmaker creates WarRoom
-    lobby --> quiz: organizer advance_phase
-    quiz --> localization: all combat-included players quizCompleted
-    localization --> positioning: arena configured ∧ players localizing
+    lobby --> quiz: organizer start_quiz
+    quiz --> localization: final reveal completes
+    localization --> positioning: arena configured ∧ all combat participants localized
     positioning --> countdown: start_battle ∧ start invariant holds
     countdown --> battle: startsAt reached
     battle --> results: one alive ∨ timer expired
@@ -250,7 +250,7 @@ stateDiagram-v2
     results --> [*]: room expiry
 ```
 
-Every inbound command is gated in this order: phase → role/authority → payload → gameplay invariant → mutation → sync/broadcast (BUILD_SPEC §8.2). Anything invalid is a typed `error`, never a state change.
+The exact inbound-command validation order and error behavior are defined in `API_AND_REALTIME_SPEC.md` §6. Invalid commands never mutate state.
 
 ### 5.2 AR session (client-owned, per phone)
 

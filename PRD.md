@@ -1,7 +1,7 @@
 # CodexWars — Product Requirements Document
 
-**Version:** 2.3
-**Status:** Approved direction — the active technical specifications are `BUILD_SPEC.md`, `ARCHITECTURE.md`, and `docs/AR_IMPLEMENTATION_SPEC.md`; `docs/archive/CODEXWARS_PRD_TDD_v1.md` is retired reference material
+**Version:** 2.4
+**Status:** Approved product direction — exact implementation contracts live in `BUILD_SPEC.md`, `ARCHITECTURE.md`, `API_AND_REALTIME_SPEC.md`, and `docs/AR_IMPLEMENTATION_SPEC.md`; archived documents are historical only
 **Horizons:** Hackathon demo first → evolve into a real product
 **Primary platforms:** Android and iOS (both required for P0; iOS iterates through EAS cloud development builds and is rehearsed through TestFlight on physical iPhones)
 **Last updated:** 2026-07-14
@@ -106,7 +106,7 @@ These decisions were made after researching the July 2026 AR landscape and the h
 - The arena is a circle on the 2D floor plane, centered on the marker, radius 3–6 m (organizer-set).
 - The printed marker defines the shared coordinate origin. Every device that recognizes it derives its own transform into arena coordinates.
 - Marker acquisition has a guided flow (distance, angle, lighting hints) and a re-scan option — Viro image tracking has known jitter/slow-acquisition history, so the UX assumes retries.
-- Minimum player spacing: 1.2–1.5 m, server-enforced at position lock.
+- Minimum player spacing is 1.5 m, with a 0.75 m marker exclusion radius; both are server-enforced at position lock.
 
 ### 6.2 Positioning
 - Position is captured once, pre-battle, as marker-relative X/Z. Y is ignored by gameplay.
@@ -134,6 +134,21 @@ These decisions were made after researching the July 2026 AR landscape and the h
 | 5–6 | +20 starting shield |
 | 7–8 | +30 starting shield |
 | 9–10 | +40 starting shield |
+
+The versioned P0 template content is:
+
+| # | Tier / time | Question | Options | Correct answer | Reveal explanation |
+|---:|---|---|---|---|---|
+| 1 | Basic / 30 s | `let x = 3; x = x + 2;` What is `x`? | 3; 5; 6; error | 5 | The assignment replaces the old value with `3 + 2`. |
+| 2 | Basic / 30 s | What is the type of `true`? | string; number; boolean; object | boolean | `true` and `false` are boolean values. |
+| 3 | Basic / 30 s | What does `if (7 > 10) { "A" } else { "B" }` select? | A; B; both; neither | B | `7 > 10` is false, so the `else` branch runs. |
+| 4 | Basic / 30 s | How many times does `for (let i = 0; i < 4; i++)` run? | 3; 4; 5; infinitely | 4 | It runs for `i = 0, 1, 2, 3`. |
+| 5 | Basic / 30 s | `function triple(n) { return n * 3; }` What is `triple(4)`? | 7; 12; 16; undefined | 12 | The function returns its input multiplied by three. |
+| 6 | Intermediate / 30 s | Given `const a = [10, 20, 30]`, what is `a[1]`? | 10; 20; 30; undefined | 20 | Array indexes begin at zero. |
+| 7 | Intermediate / 30 s | `const user = { name: "Ada", level: 1 }; user.level = 2;` What is `user.name`? | Ada; 1; 2; undefined | Ada | Updating one property does not change another. |
+| 8 | Difficult / 45 s | `const a = { score: 1 }; const b = a; b.score = 4;` What is `a.score`? | 1; 4; undefined; error | 4 | Both variables refer to the same object. |
+| 9 | Difficult / 45 s | A loop runs `n` times and contains another loop that also runs `n` times. What is the usual time complexity? | O(1); O(n); O(n log n); O(n²) | O(n²) | The body executes roughly `n × n` times. |
+| 10 | Difficult / 45 s | What must be true before using binary search correctly? | list is sorted; no duplicates; all numbers; exactly 10 items | list is sorted | Binary search discards half based on ordering. |
 
 **Product (per D6):** quiz score becomes a **point budget spent on a loadout** (shield / extra charges / one-time abilities), with:
 - a guaranteed minimum kit (floor) and diminishing returns at the top (cap),

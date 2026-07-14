@@ -1,55 +1,35 @@
 # CodexWars P0 — API and Realtime Specification
 
 **Status:** Authoritative P0 interface contract
-**Version:** 1.1
+**Version:** 1.2
 **Last updated:** 2026-07-14
 **Applies to:** M1 hackathon vertical slice
 
-This document defines how the mobile client and authoritative server collaborate for room admission, the quiz, localization, positioning, battle, results, and reconnection. It is subordinate to the active product and architecture decisions in:
+This document is the sole prose authority for P0 room admission, synchronized state, commands, events, errors, timing, ordering, and reconnection. It implements, but does not repeat, the product and structural decisions in:
 
-- `PRD.md` v2.3
-- `BUILD_SPEC.md` v1.3
-- `ARCHITECTURE.md` v1.1
+- `PRD.md` v2.4
+- `BUILD_SPEC.md` v1.4
+- `ARCHITECTURE.md` v1.2
 
 If this contract conflicts with one of those documents, stop implementation and resolve the documents together. Do not silently add a second source of truth.
 
 ---
 
-## 1. P0 decisions this specification locks
+## 1. Contract scope
 
-1. **Nickname-only sessions.** P0 has no accounts, Firebase Authentication, bearer tokens, durable user IDs, or post-session history.
-2. **Ephemeral live data.** Room, quiz, nickname, position, and battle data live in one Colyseus process and disappear when the room expires or the server restarts.
-3. **One room identifier.** The unique four-digit Colyseus `roomId` is the public room code. There is no separate code-to-room registry.
-4. **Colyseus owns admission.** The organizer uses the SDK create flow and participants use `joinById`. There are no custom P0 room-creation or seat-reservation HTTP endpoints.
-5. **Server-owned authority.** A client may request an action, but cannot select its role, participant ID, rewards, position validity, hit target, damage, or winner.
-6. **Organizer is separate.** One non-combat organizer exists outside the 12-participant capacity. `PlayerState` contains participants only.
-7. **State is recovery truth.** Colyseus Schema state holds current truth. Messages are commands, acknowledgements, errors, and one-time effects.
-8. **AR stays local.** The server receives marker-relative X/Z positions, coarse localization state, and an aim direction only when attacking. It never receives camera frames, Viro objects, continuous pose streams, or client-computed hits.
-9. **One bundled P0 character.** Character and palette selection are P1. The server uses the fixed P0 avatar/loadout and does not expose a character-catalog API.
-10. **No runtime cloud dependency.** Firebase scaffolding may remain in the repository for later work, but P0 admission, play, readiness, and results must work on an isolated organizer hotspot.
-
-### 1.1 Changes from version 1.0
-
-Version 1.0 predated the current product decisions. Version 1.1 removes mandatory Firebase auth and Firestore persistence, the custom admission HTTP service, the duplicate room-code registry, durable quiz result reads, and P1 character selection. It also aligns organizer modeling, round/event identifiers, tracking freshness, arena safety distances, reset behavior, and the implementation order with the active documents.
+- Sessions are nickname-only and in-memory; P0 has no account, token-verification, persistence, or runtime-cloud interface.
+- Colyseus matchmaking owns admission. Its four-digit `roomId` is the public code.
+- The server binds one non-combat organizer and up to 12 participant records; role and player authority never come from command payloads.
+- Schema state is recovery truth. Messages carry commands, acknowledgements, errors, and transient effects.
+- The server receives no camera frames, Viro objects, continuous poses, or client-computed hits. P0 uses the fixed bundled quiz, avatar, and bolt loadout.
 
 ---
 
 ## 2. Topology and transport
 
-### 2.1 P0 demo topology
+The deployment topology is defined in `ARCHITECTURE.md`. This section defines only the transport surfaces visible to clients and operators.
 
-```text
-Android/iOS app ── Colyseus SDK over ws:// ── laptop-hosted Node/Colyseus process
-                                           ├── WarRoom instances
-                                           ├── bundled quiz template
-                                           └── in-memory Presence/room state
-```
-
-The laptop and phones share a phone hotspot or local network. Internet access is not required. The mobile app stores the manually entered server base URL locally.
-
-For a hosted product, TLS/WSS termination, WebSocket-aware ingress, process supervision, compatibility policy, metrics, abuse protection, and shared Presence/Driver must be designed explicitly. Replacing `ws://LAN-IP` with a public URL is not a complete M3 architecture.
-
-### 2.2 Transport split
+### 2.1 Transport split
 
 | Transport | P0 responsibility |
 |---|---|
@@ -59,9 +39,9 @@ For a hosted product, TLS/WSS termination, WebSocket-aware ingress, process supe
 | Colyseus messages | Validated commands, acknowledgements, errors, and transient effects |
 | Local mobile storage | Server URL and the current short-lived reconnection token only |
 
-There is no REST polling for lobby, quiz, positions, HP, results, or room discovery.
+There is no REST polling for lobby, quiz, positions, HP, results, or room discovery. P0 configures Schema patches at 100 ms (10 Hz); discrete authoritative events are sent immediately.
 
-### 2.3 Operational HTTP
+### 2.2 Operational HTTP
 
 #### `GET /health`
 
@@ -131,7 +111,7 @@ Admission validates:
 - nickname is normalized and valid; and
 - the reservation has not already produced a participant record.
 
-Duplicate nicknames are allowed. The server assigns a display suffix for the room projection, such as `Alex`, `Alex (2)`, while keeping the server-generated `playerId` as the real identifier.
+Nickname normalization applies Unicode NFKC, trims leading/trailing whitespace, collapses internal whitespace, rejects control characters, and requires 1–20 Unicode code points. Duplicate nicknames are allowed: the first keeps the normalized name and later records receive ` (2)`, ` (3)`, and so on. The server-generated `playerId`, never the displayed name, remains the identifier.
 
 ### 3.3 What “authentication” means in P0
 
@@ -151,7 +131,7 @@ This protects organizer controls and participant ownership inside a live room wi
 - Allocation: generate cryptographically random candidates until Presence confirms the candidate is unused.
 - Registration: add the selected ID to the Presence set before the room accepts joins.
 - Disposal: remove it from Presence in `onDispose`.
-- Exhaustion/collision retry has a bounded failure path and produces an operator-visible error.
+- Allocation tries at most 100 random candidates. Exhaustion fails creation with `ROOM_ID_EXHAUSTED` and an operator log; it never falls back to a longer or second identifier.
 
 With the single-process P0 deployment, the default in-memory Presence is sufficient. A horizontally scaled deployment requires shared Presence, normally Redis, before custom IDs are safe across processes.
 
@@ -189,7 +169,7 @@ type CommandMeta = {
 };
 ```
 
-The server keeps a bounded per-client, per-round deduplication cache. Receiving the same `commandId` again must not repeat a mutation. It returns the previous acknowledgement where practical; otherwise it returns `COMMAND_DUPLICATE` and relies on state reconciliation.
+The server stores the outcome of every accepted mutating command in a per-client, per-round cache capped at 512 entries with no within-round eviction. A repeated `commandId` returns the stored outcome without mutation. Reaching the cap rejects new mutating commands with `RATE_LIMITED` until reset.
 
 Reset increments `roundId`, clears command deduplication, and resets `eventSequence` to zero. A client ignores state-derived effects and events from an older round or an already-applied sequence.
 
@@ -292,7 +272,7 @@ type PublicQuizQuestion = {
   order: number;
   prompt: string;
   options: Array<{ id: string; label: string }>;
-  difficulty: "basic" | "difficult";
+  difficulty: "basic" | "intermediate" | "difficult";
   durationMs: number;
 };
 
@@ -413,7 +393,7 @@ Requirements: `lobby`, template ready, organizer connected, and at least one par
 type StartBattle = CommandMeta;
 ```
 
-Allowed only in `positioning`. Every combat-included participant must be:
+Allowed only in `positioning`. At least two participants must be combat-included, and every combat-included participant must be:
 
 ```text
 connected
@@ -529,7 +509,7 @@ Validation at server receipt:
 - current round and unseen command;
 - `phase=battle`, battle active, and `startsAt <= now < endsAt`;
 - sender connected, combat-included, alive, positioned, and localization not `lost`;
-- finite direction with sufficient horizontal magnitude, normalized server-side;
+- finite direction with magnitude within `[0.1, 2]`, normalized server-side;
 - fixed server-owned bolt loadout, cooldown elapsed, and charge rule satisfied.
 
 Resolution:
@@ -542,6 +522,8 @@ Resolution:
 6. Increment `eventSequence`, patch state, and emit `attack_resolved`.
 7. Emit `player_eliminated` once if required, with its own next sequence.
 8. Evaluate last-alive completion after mutation.
+
+Timer completion ranks by remaining HP, then quiz score, then stable `playerId` ordering. Results remain until reset or room expiry.
 
 `predictedTargetId`, pitch, mesh height, bones, animations, and projectile visuals never affect the result.
 
@@ -653,65 +635,9 @@ Clients apply an event effect only when `roundId` matches and `eventSequence` is
 
 ---
 
-## 8. State machines
+## 8. Reconnection, disconnects, and expiry
 
-### 8.1 Room phase
-
-```mermaid
-stateDiagram-v2
-    [*] --> Lobby: create WarRoom
-    Lobby --> Quiz: organizer starts fixed quiz
-    Quiz --> Localization: quiz completes
-    Localization --> Positioning: arena configured and localization flow begins
-    Positioning --> Countdown: organizer start and invariant passes
-    Countdown --> Battle: startsAt reached
-    Battle --> Results: one alive or endsAt reached
-    Results --> Lobby: organizer reset
-    Results --> [*]: room expires
-```
-
-### 8.2 Quiz
-
-```mermaid
-stateDiagram-v2
-    [*] --> Ready: bundled template selected
-    Ready --> Question: organizer starts
-    Question --> Reveal: server deadline
-    Reveal --> Question: reveal deadline and questions remain
-    Reveal --> Completed: question 10 reveal deadline
-    Completed --> [*]
-```
-
-Rules:
-
-1. Only one public question projection exists at a time.
-2. Each participant submits once; peers see aggregate count and their own boolean, never another option.
-3. Server deadlines advance despite disconnected/silent participants.
-4. Correctness stays private until reveal.
-5. Missing answers score zero.
-6. Completion derives deterministic shield rewards and moves directly to localization.
-7. Reconnect restores the question, deadline, submission boolean, and public phase from state.
-
-### 8.3 Battle
-
-```mermaid
-stateDiagram-v2
-    [*] --> Positioning
-    Positioning --> Countdown: start invariant passes
-    Countdown --> Active: startsAt reached
-    Active --> Active: server resolves attack
-    Active --> Completed: one alive
-    Active --> Completed: endsAt reached
-    Completed --> [*]
-```
-
-Timer completion ranks by remaining HP, then quiz score, then stable `playerId` ordering. The final fallback prevents winner selection from depending on map iteration order. Results remain only until reset or room expiry.
-
----
-
-## 9. Reconnection, disconnects, and expiry
-
-### 9.1 Reconnection flow
+### 8.1 Reconnection flow
 
 The mobile adapter retains `room.reconnectionToken` only for the active session and calls the Colyseus reconnect flow after an unintentional drop. On successful `onReconnect`, the server reattaches the connection to the same organizer/player record and sends current state.
 
@@ -723,26 +649,26 @@ The client must distinguish:
 
 Do not log or include reconnection tokens in analytics, errors, or synchronized state.
 
-### 9.2 Participant disconnect policy
+### 8.2 Participant disconnect policy
 
 - Before battle: retain the participant record and mark `connected=false`; readiness becomes false. The organizer can continue once they return or exclude them from combat.
 - During countdown/battle: retain position, HP, shield, and cooldown for 20 seconds.
 - Reconnect within 20 seconds: reattach unchanged state.
 - Grace expiry during battle: eliminate exactly once and broadcast the authoritative result.
 
-### 9.3 Organizer disconnect policy
+### 8.3 Organizer disconnect policy
 
 - Before countdown: keep the phase unchanged and disable organizer-only commands for 60 seconds. Grace expiry closes the in-memory room.
 - During countdown/battle: timers and combat continue; organizer controls remain unavailable until reconnection.
 - The organizer role never transfers automatically to a participant in P0.
 
-### 9.4 Room expiry and restart
+### 8.4 Room expiry and restart
 
-Rooms expire after two hours of inactivity or the organizer pre-battle grace policy. A process restart ends every room. P0 deliberately provides no room resurrection or durable result recovery.
+Rooms expire after two hours without a successful join, reconnect, or accepted in-room command, or when the organizer pre-battle grace policy closes them. A process restart ends every room. P0 deliberately provides no room resurrection or durable result recovery.
 
 ---
 
-## 10. Error catalogue
+## 9. Error catalogue
 
 Matchmaking errors are translated by `warRoomClient.ts` into the same app-level error shape used for room messages.
 
@@ -752,6 +678,7 @@ Matchmaking errors are translated by `warRoomClient.ts` into the same app-level 
 | `ROOM_NOT_FOUND` | Matchmaking | No active room has that ID | No; check code |
 | `ROOM_NOT_JOINABLE` | Matchmaking | Room is not accepting participants | No |
 | `ROOM_FULL` | Matchmaking | 12 participants already admitted | No |
+| `ROOM_ID_EXHAUSTED` | Matchmaking | No unique four-digit ID found after 100 attempts | Yes |
 | `NICKNAME_INVALID` | Matchmaking | Nickname violates normalization/length rules | No |
 | `SESSION_EXPIRED` | Reconnect | Token or room no longer exists | No; return home |
 | `ROLE_FORBIDDEN` | Message | Server-bound role cannot perform command | No |
@@ -780,12 +707,12 @@ P0 has no auth-token, template-storage, or persistence-unavailable errors becaus
 
 ---
 
-## 11. Abuse controls, payload limits, and logs
+## 10. Abuse controls, payload limits, and logs
 
 The LAN demo does not need internet-grade account abuse controls, but it still needs bounded input:
 
-- Matchmaking create/join: small per-IP burst limit at the HTTP/WebSocket edge when hosted; local demo defaults must not lock out a 12-device rehearsal.
-- `quiz_answer`: one accepted answer per participant/question; cap malformed attempts.
+- Hosted matchmaking throttles are deferred to the required M3 threat-model review; the P0 LAN server applies no per-IP admission quota.
+- `quiz_answer`: one accepted answer and at most five malformed attempts per participant/question.
 - Localization, position, and readiness commands: maximum 5/s per client.
 - `attack`: weapon cooldown is authoritative; cap raw attempts at 10/s and disconnect persistent abuse.
 - Maximum room command payload: 2 KiB.
@@ -797,80 +724,9 @@ Room-code enumeration resistance becomes important for an internet-hosted produc
 
 ---
 
-## 12. Module boundaries
+## 11. Contract conformance
 
-The P0 design keeps two deep pure domain modules and one network orchestrator:
-
-```ts
-interface QuizEngine {
-  configure(template: QuizTemplate, cohort: Cohort): QuizTransition;
-  start(now: number): QuizTransition;
-  submit(playerId: PlayerId, answer: AnswerInput, receivedAt: number): QuizTransition;
-  advance(now: number): QuizTransition;
-}
-
-interface BattleEngine {
-  start(players: BattlePlayer[], now: number): BattleTransition;
-  attack(playerId: PlayerId, input: AttackInput, receivedAt: number): BattleTransition;
-  expire(now: number): BattleTransition;
-}
-```
-
-`WarRoom` owns lifecycle, server-bound roles, phase authorization, timers, deduplication, reconnection, Schema projection, and event emission. It invokes pure quiz, reward, geometry, and battle logic from `packages/shared`.
-
-The fixed quiz and fixed character/loadout are bundled modules, not repository/catalog interfaces. P0 has only one implementation of each, so a `QuizRepository`, `CharacterCatalog`, or `RoomAdmission` abstraction would be a speculative middle layer. Add a port when a real second source or remote system is approved:
-
-- authored/durable quiz storage in P2;
-- multiple character definitions in P1;
-- hosted identity/abuse controls in P2/M3; or
-- external admission/business policy in a hosted architecture.
-
-When durable quiz storage is approved, place it behind an explicit server-owned port and keep Firestore details out of `WarRoom` and shared domain types. Do not reactivate existing Firebase scaffolding merely because it exists.
-
-On mobile, `lib/warRoomClient.ts` is the only `@colyseus/sdk` importer. It exposes app-level create/join/reconnect/send/subscribe methods and translates transport errors. AR code remains behind `ArSessionState`/`ArPose` and never imports the network client.
-
----
-
-## 13. Implementation dependency graph and order
-
-```mermaid
-flowchart TD
-    A[Shared constants, protocol v1, validators] --> B[Schema classes]
-    A --> C[Pure quiz and reward engine]
-    A --> D[Pure geometry and battle engine]
-    E[Custom four-digit roomId via Presence] --> F[WarRoom lifecycle and admission]
-    B --> F
-    C --> F
-    D --> F
-    F --> G[Mobile warRoomClient adapter]
-    G --> H[Quiz and lobby screens]
-    G --> I[Localization and position UI]
-    G --> J[AR battle, HUD, and results]
-```
-
-Execution order:
-
-1. Lock the Colyseus server/client/testing dependency pair already selected in `BUILD_SPEC.md`.
-2. Add protocol v1 types, runtime validators, constants, reward rules, and pure 2D combat/geometry functions to `packages/shared`.
-3. Implement Schema classes and serialization tests, including answer-key and token leak tests.
-4. Replace the plain HTTP bootstrap with Colyseus `defineServer`, retaining `/health` and `/ready`.
-5. Implement custom four-digit `roomId` allocation/release through Presence.
-6. Implement SDK create/join-by-ID integration, server-bound roles, participant capacity, nickname suffixing, and reconnect reattachment.
-7. Implement `WarRoom` phases, authorization, command deduplication, event ordering, clock sync, organizer policy, and expiry.
-8. Implement the bundled Quiz Engine, automatic timers, reveal, scoring, and shield rewards entirely in memory.
-9. Implement arena configuration, tracking status, marker exclusion, locked-position validation, correction vectors, and state sync.
-10. Implement Battle Engine, countdown, attack resolution, disconnect elimination, deterministic winner, and reset.
-11. Implement `warRoomClient.ts` and state subscriptions before feature screens.
-12. Build lobby/quiz UI, then localization/minimap, then AR battle/HUD/results.
-13. Run two-client, 12-client, reconnect, server-restart, and mixed Android/iOS rehearsals.
-
-Firebase token verification, Firestore repositories, a code registry, custom seat-reservation endpoints, and character catalog/rules HTTP endpoints are not P0 dependencies.
-
----
-
-## 14. Required tests
-
-### 14.1 Contract and privacy
+### 11.1 Contract and privacy
 
 - Every command/event validates at runtime.
 - Unknown authority-sensitive fields reject.
@@ -878,7 +734,7 @@ Firebase token verification, Firestore repositories, a code registry, custom sea
 - Schema snapshots contain no role claim input, token, selected answer, unrevealed answer key, or AR pose.
 - P0 server boots and completes a round with no internet/Firebase configuration.
 
-### 14.2 Matchmaking and session authority
+### 11.2 Matchmaking and session authority
 
 - Organizer SDK create returns a room whose four-digit `roomId` is joinable with `joinById`.
 - Concurrent room creation never allocates the same active ID.
@@ -890,7 +746,7 @@ Firebase token verification, Firestore repositories, a code registry, custom sea
 - A participant cannot obtain organizer authority through payload/message tampering.
 - No custom code registry or admission HTTP route is required for the flow.
 
-### 14.3 Quiz
+### 11.3 Quiz
 
 - Bundled template validates exactly ten questions at startup.
 - Start freezes the cohort.
@@ -902,7 +758,7 @@ Firebase token verification, Firestore repositories, a code registry, custom sea
 - Quiz completion advances without a persistence dependency.
 - Reconnect restores current question, deadline, and own accepted-answer boolean.
 
-### 14.4 Positioning and battle
+### 11.4 Positioning and battle
 
 - Arena radius boundaries, 0.75 m marker exclusion, and 1.5 m spacing boundaries.
 - Rejection correction vector is finite, points toward a valid location, and has the stated magnitude.
@@ -917,7 +773,7 @@ Firebase token verification, Firestore repositories, a code registry, custom sea
 - Last-alive and timer results are deterministic, including exact ties.
 - Reset increments `roundId` and removes every previous-round field/dedup entry.
 
-### 14.5 Reconnection, performance, and devices
+### 11.5 Reconnection and load
 
 - Participant reconnect within 20 seconds restores state; timeout eliminates once.
 - Organizer reconnect within pre-battle 60 seconds restores controls; timeout closes room.
@@ -925,39 +781,3 @@ Firebase token verification, Firestore repositories, a code registry, custom sea
 - Missed/duplicate events recover from Schema state and ordering fields.
 - Twelve participants can answer near the same deadline.
 - Twelve-player battle at maximum allowed attack rate stays within the 10 Hz patch budget.
-- Android and iOS reconnect on the recommended hotspot topology.
-- Same locked positions render consistently on Android and iPhone.
-- AR sends no continuous pose/aim traffic; stale pose disables firing within one second.
-
----
-
-## 15. Capability-to-interface checklist
-
-| Product capability | P0 interface |
-|---|---|
-| Organizer creates room | `client.create("war", options)` |
-| Participant joins | `client.joinById(roomId, options)` |
-| Resume dropped session | Colyseus reconnect token + room lifecycle |
-| Organizer selects fixed quiz | `select_quiz_template` |
-| Organizer starts quiz | `start_quiz` |
-| Participant receives questions | `QuizPublicState.currentQuestion` |
-| Participant answers/checks | `quiz_answer`, private acknowledgement/result, public reveal |
-| Get quiz result/reward | Current room state + private `quiz_completed`; no durable history |
-| Use P0 character/stats | Fixed shared constants + `PlayerPublicState`; no catalog API |
-| Configure arena | `configure_arena` |
-| Get all participant positions | `RoomState.players` Schema patches |
-| Organizer starts battle | `start_battle`, state `startsAt`, countdown event |
-| Participant attacks | `attack` |
-| Resolve hit/HP/elimination | State patches + ordered battle events |
-| Get winner/results | `BattleState` + `battle_completed` |
-| Run another round | `reset_round` |
-
----
-
-## 16. Current implementation gap
-
-At the time of this revision, the repository contains partial scaffolding, including a plain health server, Firebase-related helpers/repository work, the demo quiz, shared types, and mobile AR/GLB work. Presence of code is not the same as approved P0 runtime architecture.
-
-The target P0 path still requires the Colyseus dependency/bootstrap, Schema state, custom `roomId`, SDK create/join/reconnect integration, `WarRoom`, complete runtime validators, quiz timers, arena/position rules, battle logic, ordering/deduplication, and realtime integration tests.
-
-Existing Firebase code must remain disconnected from P0 startup/admission/gameplay or be removed in a separate cleanup. It must not make `/ready`, quiz progression, or results depend on internet access. Future persistence requires an explicit P2 product decision and a new architecture review.
