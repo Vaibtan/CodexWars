@@ -15,7 +15,7 @@ The PRD establishes the following constraints:
 - Players lock a stationary marker-relative position before battle. They rotate to aim but do not walk during combat.
 - The server receives only marker-relative X/Z positions and a normalized aim direction when an attack is fired. It computes hits, shields, HP, eliminations, and winners.
 - Camera frames never leave the device. There is no face/body recognition.
-- P0 uses the default avatar. Character choice and three selectable characters are P1 work, after M0 proves Android-to-iPhone marker colocation and M1 proves the complete battle loop.
+- P0 renders one bundled default GLB avatar after M0 proves Android-to-iPhone marker colocation. Character choice and three additional selectable GLB cosmetics are P1 work, after M1 proves the complete battle loop.
 
 Therefore, a GLB is never a source of gameplay truth. It is a local visual representation of a server-owned `characterId` at a server-owned arena position.
 
@@ -81,9 +81,9 @@ The server does not inspect GLB files and does not know ARKit, ARCore, Viro, mes
 
 ## 4. Asset contract
 
-### 4.1 P1 catalog
+### 4.1 P0 default and P1 catalog
 
-Ship three approved characters with the app initially. Remote asset delivery is a P2 optimization and must retain a bundled fallback for the demo.
+Ship the `default` GLB with P0. P1 adds the three approved cosmetic characters `ember`, `moss`, and `nova`. Remote asset delivery is a P2 optimization and must retain a bundled fallback for the demo.
 
 ```ts
 export type CharacterId = "default" | "ember" | "moss" | "nova";
@@ -249,7 +249,7 @@ For each `PlayerState`:
 - Billboard the name/HP/shield label toward the local camera; the character mesh may face its gameplay heading or the camera according to the visual direction chosen in playtest.
 - Play `Idle` while alive and stationary. Trigger `Hit` only from an authoritative `attack_resolved` event. Trigger `Eliminated` only when server state marks that player eliminated.
 - Do not hide or move the avatar based on a local predicted hit. Prediction may highlight a target, but only server results create persistent effects.
-- Keep the P0 default sprite implementation selectable by a presentation feature flag until GLB performance and tracking quality pass M2 device tests.
+- P0 always renders the bundled `default` GLB after M0 go/conditional-go. A recoverable local error state may substitute a simple placeholder only when the asset fails to load; it cannot alter gameplay.
 
 ### 7.4 Illustrative component boundary
 
@@ -278,20 +278,22 @@ This example intentionally omits networking, coordinate conversion, attack resol
 Visual GLB projectiles may be used, but projectile motion is an animation of an already-authoritative event.
 
 1. Player presses the basic-bolt button.
-2. Client reads the latest marker-relative aim direction and sends the existing `attack` command.
+2. Client projects the latest marker-relative camera-forward vector onto the X/Z floor plane, normalizes it, and sends the existing `attack` command. Vertical pitch is discarded, so aiming above or below a player's rendered head has no gameplay effect when the floor-plane direction is unchanged.
 3. Server performs the PRD's nearest ray-vs-circle test using canonical `PLAYER_HIT_RADIUS_M` and weapon ray width.
 4. Server broadcasts the result.
 5. Clients draw a bolt/flash toward the server-confirmed target position (or a short miss effect for `targetId: null`).
 
-No character mesh collider, bone collider, GLB bounding box, or ARKit raycast result can change whether an attack hits. This keeps mixed-device matches deterministic despite image-marker jitter and different client asset detail.
+No character mesh collider, bone collider, GLB bounding box, avatar height, or ARKit raycast result can change whether an attack hits. The server considers only the floor-plane ray, canonical player circle, weapon radius, and range; it selects the nearest eligible circle. This keeps mixed-device matches deterministic despite image-marker jitter and different client asset detail.
+
+If floor projection produces a vector below `AIM.MIN_HORIZONTAL_MAGNITUDE`, the client disables fire with an "aim level" cue and sends no attack. This is the only camera-pitch constraint; it is not a mesh or screen-space target check.
 
 ## 9. Delivery plan and acceptance criteria
 
 | Milestone | GLB/AR work | Exit criterion |
 |---|---|---|
 | M0 | No character work required; marker scene may use a simple diagnostic primitive | Android and iPhone meet the marker acquisition, agreement, drift, and tracking-loss thresholds in `BUILD_SPEC.md`. |
-| M1 / P0 | Keep default sprite. Validate that AR boundary, coordinate conversion, and full battle work on 3–4 devices | The four PRD demo success criteria pass twice in a row. |
-| M2 / P1 | Add three bundled GLBs, picker, catalog validation, preloading, hit/elimination animations, and performance instrumentation | All P1 GLBs load on an ARKit iPhone and ARCore Android; 12-avatar worst case sustains ≥30 FPS; no gameplay test changes with presentation switched from sprite to GLB. |
+| M1 / P0 | Render the bundled default GLB; validate AR boundary, coordinate conversion, and full battle on 3–4 devices | The four PRD demo success criteria pass twice in a row. |
+| M2 / P1 | Add three bundled cosmetic GLBs, picker, catalog validation, preloading, hit/elimination animations, and performance instrumentation | All P1 GLBs load on an ARKit iPhone and ARCore Android; 12-avatar worst case sustains ≥30 FPS; no gameplay test changes across GLB cosmetics. |
 | P2 | Consider approved remote catalog/versioning and richer cosmetics | Offline/demo fallback still works with bundled assets; asset failure has a visible fallback, not a broken battle screen. |
 
 Required tests:
@@ -313,11 +315,11 @@ Required tests:
 
 ## 11. Implementation checklist
 
-1. Complete M0 before introducing GLBs.
+1. Complete M0 before rendering the P0 default GLB; M0 itself uses diagnostic primitives only.
 2. Add `CharacterId` and default selection to shared/server schema; test phase-gated selection.
 3. Add the bundled GLB catalog and Metro asset configuration; verify native dev builds on both platforms.
-4. Implement `Avatar.tsx` exclusively inside `src/ar/` and retain sprite fallback.
+4. Implement `Avatar.tsx` exclusively inside `src/ar/`, rendering the bundled default GLB and only a recoverable placeholder on local asset failure.
 5. Preload the selected character before positioning; block readiness with a recoverable asset-error message if it cannot load.
 6. Connect authoritative combat events to visual animation/effect queues only after server broadcast.
 7. Profile 3–4 devices in a real room, then enforce the M2 performance budget.
-8. Update `M0_RESULTS.md` / milestone evidence and only then enable GLB characters in the production demo flow.
+8. Update `M0_RESULTS.md` / milestone evidence and only then enable the default GLB in the production demo flow.

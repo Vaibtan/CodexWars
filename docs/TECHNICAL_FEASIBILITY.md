@@ -1,7 +1,7 @@
 # CodexWars P0 — Technical Feasibility and Recommended Stack
 
 **Assessed:** 2026-07-14  
-**Inputs:** `PRD.md` v2.1, `BUILD_SPEC.md` v1.1, and `ARCHITECTURE.md` v1.0  
+**Inputs:** `PRD.md` v2.2, `BUILD_SPEC.md` v1.2, `ARCHITECTURE.md` v1.0, and `AR_IMPLEMENTATION_SPEC.md`
 **Verdict:** **Conditionally feasible for the hackathon vertical slice.** Android+iOS image-marker AR, native Expo development builds, and an authoritative LAN game server are all supported by the selected tools. The project must not be declared feasible until M0 measures real Android-to-iPhone marker alignment and tracking persistence. No official source can guarantee the PRD's 0.30 m / 90 s thresholds in the specific room, marker, lighting, and device mix.
 
 ## Final P0 stack
@@ -9,11 +9,11 @@
 | Concern | Recommendation | Why it fits P0 |
 |---|---|---|
 | Mobile frontend | **TypeScript + React Native + Expo SDK 56 development build**; React Navigation; Zustand for session and local battle UI state | One app codebase for Android and iOS. Expo development builds allow native modules; Expo Go does not. |
-| AR / 3D renderer | **`@reactvision/react-viro` 2.57.x**, isolated behind `apps/mobile/src/ar/` | Supplies ARCore-mode Android support, iOS native configuration, image markers, camera transform callbacks, billboarding, images, particles, and 3D primitives. |
+| AR / 3D renderer | **`@reactvision/react-viro` 2.57.4**, isolated behind `apps/mobile/src/ar/` | Supplies ARCore-mode Android support, iOS native configuration, image markers, camera transform callbacks, billboarding, images, particles, and GLB rendering. |
 | Marker colocation | One bundled, printed, asymmetric A4 image target; `ViroARTrackingTargets` + `ViroARImageMarker`; physical width declared as **0.297 m** | Image markers are explicitly designed to place content relative to a known image. The physical-width input is essential for scale. No cloud anchor is needed. |
-| 3D assets / effects | **2D transparent PNG billboard sprites** (default avatar, name/HP), `ViroQuad`/`ViroImage`, simple Viro primitives and pooled particle/flash effects; audio/haptics via Expo | This directly matches the PRD's no-rig/no-physics P0. Do not introduce glTF character rigs, Unity, occlusion, or real projectile physics for P0. |
+| 3D assets / effects | **One bundled default GLB**, rendered by Viro under the marker node; billboard name/HP, bounded pooled bolt/flash effects, and Expo audio/haptics | GLB rendering is P0 presentation only. The server ignores mesh/bone/bounds/height and resolves only a floor-plane ray against canonical 2D player circles. No occlusion or real projectile physics in P0. |
 | Multiplayer backend | **Node.js 22 LTS + TypeScript + Colyseus 0.17.x**; one authoritative `WarRoom`; shared pure TypeScript combat package | Colyseus rooms provide state synchronization and WebSocket transport; the server can retain the authoritative 2D state and resolve discrete attacks. |
-| Mobile multiplayer client | **`@colyseus/sdk` compatible with the selected 0.17 server** | Current Colyseus 0.17 documentation uses this SDK and its automatic reconnection lifecycle. Do **not** retain the legacy `colyseus.js` 0.16.22 pin in `BUILD_SPEC.md` without a proven compatibility test. |
+| Mobile multiplayer client | **`@colyseus/sdk` 0.17.43**, paired with **`colyseus` 0.17.10** server | Current Colyseus 0.17 documentation uses this SDK and its automatic reconnection lifecycle. Verify this exact pinned pair in the first networking spike. |
 | Multiplayer synchronization | Colyseus schema state at **10 Hz / 100 ms** for lobby, player state, HP, and phase; immediate `attack_resolved` events for combat results; discrete attack commands only | No pose stream is needed. The client keeps aim local and sends a normalized direction only when firing; the server validates cooldown/phase/aliveness and ray-vs-circle hit testing. |
 | P0 data store | **None.** Room/player state remains in the single Colyseus process's memory and expires after two idle hours. | This is the stated privacy-minimal P0 requirement. A database would increase scope without supporting the vertical-slice flow. |
 | P0 runtime / cloud | **No runtime cloud.** Run Node/Colyseus on the demo laptop, with all phones on the same non-isolated hotspot/LAN. EAS Build is used only to build iOS development/TestFlight binaries. | Keeps the demo independent of venue internet and follows the architecture's local-first topology. |
@@ -33,14 +33,14 @@ Android device eligibility remains a real constraint: ARCore certification is de
 
 **Conclusion:** the APIs exist, but *cross-device spatial accuracy is unproven*. Keep M0 as a hard go/conditional-go/no-go gate. The marker must be print-tested at its declared size, in the intended lighting and at the actual 2–4 m distances. Treat device local tracking as another M0 measurement, not a promise of the marker API.
 
-### 2. Rendering plan — feasible and intentionally small
+### 2. GLB rendering plan — feasible and bounded
 
-The selected renderer can track an image, render content in AR, and provide camera pose data. P0 only needs flat billboards, labels, a ring, flash/projectile feedback, and a camera-space HUD; it does not need a general 3D game engine. Viro documents billboard transform behavior and native updates that avoid React re-renders for frequent scene changes. [Viro image marker API](https://viro-community.readme.io/docs/viroarimagemarker)
+The selected renderer can track an image, render bundled GLB content in AR, and provide camera pose data. P0 needs one default GLB, labels, a ring, flash/projectile feedback, and a camera-space HUD; it does not need a general 3D game engine. Viro documents billboard transform behavior and native updates that avoid React re-renders for frequent scene changes. [Viro image marker API](https://viro-community.readme.io/docs/viroarimagemarker)
 
 Use these asset budgets:
 
-- PNGs: 256–512 px transparent sprites, one default avatar and a small atlas for effects.
-- Geometry: one billboard/quad per visible opponent, boundary ring/line, and primitive/projectile meshes only.
+- GLB: one bundled default avatar, ≤15,000 triangles target (≤25,000 hard cap), ≤4 materials/draw calls, ≤5 MB target (≤8 MB hard cap), with embedded textures.
+- Effects: 256–512 px transparent texture atlas for bounded flashes/hits; boundary ring/line and simple visual projectile mesh only.
 - Effects: pool a bounded number of particles/flashes; never create an unbounded React tree during battle.
 - No depth/occlusion model in P0. ReactVision documents extra setup for non-LiDAR iOS depth features; they are not required by the PRD. [Viro Expo integration guide](https://viro-community.readme.io/docs/integrating-with-expo)
 
@@ -58,13 +58,13 @@ The approved specifications require nickname-only, in-memory rooms and deletion 
 
 For a later hosted product, use a single VPS/PaaS Node service behind TLS/WebSocket-aware Nginx or the provider's equivalent. When horizontally scaling room processes, Colyseus requires a shared Presence and Driver; its official scalability guide shows Redis for those roles. Add PostgreSQL only for product data such as organizers, authored quizzes, session history, and consent/retention records—not for 60-second in-progress combat. [Colyseus scalability guide](https://docs.colyseus.io/scalability)
 
-## Required corrections and gates before coding
+## Locked stack and gates before coding
 
-1. **Correct the client library line:** replace the `colyseus.js` 0.16.22 recommendation in `BUILD_SPEC.md` with a version-pinned `@colyseus/sdk` compatible with the chosen 0.17 server; lock and test the exact pair in the first networking spike. The active 0.17 lifecycle differs from older `onLeave`-only examples. [Colyseus package versions](https://www.npmjs.com/package/colyseus?activeTab=versions)
+1. **Verify the locked client pair:** use `@colyseus/sdk` 0.17.43 with `colyseus` 0.17.10 in the first networking spike. The active 0.17 lifecycle differs from older `onLeave`-only examples. [Colyseus package versions](https://www.npmjs.com/package/colyseus?activeTab=versions)
 2. **Run M0 before feature work:** prove marker detection time, Android-to-iPhone alignment, drift over the camera-on window, marker-loss behavior, and 30 FPS on the intended physical devices. This is the only critical technical uncertainty.
 3. **Build iOS on day one:** configure EAS signing, create an iPhone development build, and install it before writing AR gameplay. A paid Apple Developer account and actual ARKit-capable iPhone are P0 dependencies.
 4. **Make local networking testable:** add a persisted server URL setting, startup health endpoint, clear connection error, and a rehearsal checklist covering hotspot isolation/firewall behavior.
-5. **Keep the renderer bounded:** use sprites and pooled effects only. A Viro regression or M0 colocation failure should permit a later mobile-renderer replacement without changing `packages/shared` or the Colyseus protocol.
+5. **Keep the renderer bounded:** use the one bundled default GLB and pooled effects only. A Viro regression or M0 colocation failure should permit a later mobile-renderer replacement without changing `packages/shared` or the Colyseus protocol.
 
 ## Final feasibility decision
 

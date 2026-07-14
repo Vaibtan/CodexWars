@@ -7,3 +7,13 @@ dist/
 firebase-debug.log
 firestore-debug.log
 ui-debug.log
+
+# 3D character source assets are local authoring material. Commit only optimized
+# runtime GLBs that are deliberately placed under assets/characters/runtime/.
+assets/characters/*
+!assets/characters/README.md
+!assets/characters/runtime/
+assets/characters/runtime/*
+!assets/characters/runtime/.gitkeep
+!assets/characters/runtime/*.glb
+!assets/characters/runtime/**/*.glb

@@ -1,7 +1,7 @@
 # CodexWars — Build Specification
 
-**Version:** 1.1
-**Companion to:** `PRD.md` v2 (product requirements; decision log in §2 there)
+**Version:** 1.2
+**Companion to:** `PRD.md` v2.2 (product requirements; decision log in §2 there)
 **Scope:** M0 (cross-platform colocation spike) through M2 (hardened P1). Product work is sketched only.
 **Last updated:** 2026-07-14 — all package versions below verified against the npm registry on this date.
 
@@ -31,7 +31,7 @@ Versions verified on npm, 2026-07-14:
 | `expo` | **56.0.15** | App framework, dev builds | SDK 56 = mature line (Viro-proven). SDK 57.0.4 exists but is days old — revisit after M1. RN version comes from the SDK template; never override it. |
 | `@reactvision/react-viro` | **2.57.4** | AR rendering + image markers | Peer range: Expo ≥55 <58, RN ≥0.83 <0.87 — SDK 56 fits. Requires a **development build** (`expo prebuild` / dev client); Expo Go cannot load it. |
 | `colyseus` | **0.17.10** | Authoritative game server | 0.17 line: `defineServer()`, auto-reconnection, `onDrop`/`onReconnect` hooks. |
-| `colyseus.js` | **0.16.22** | Mobile client for Colyseus | The 0.16.x client is the current pairing for the 0.17 server (client/server version lines diverged upstream — this is correct, not a mismatch). |
+| `@colyseus/sdk` | **0.17.43** | Mobile client for Colyseus | Official 0.17 client SDK. Pin and verify this exact pair with the 0.17.10 server in the first networking spike. |
 | `zustand` | 5.0.x | Client UI state | Small, no boilerplate. |
 | `typescript` | 5.x (workspace-wide) | Everything | Strict mode on. |
 | Node.js | **22 LTS** | Server + tooling runtime | Pin via `.nvmrc`/`engines`. |
@@ -74,15 +74,15 @@ CodexWars/
 │       ├── src/
 │       │   ├── screens/      # navigation targets (see §9.2)
 │       │   ├── ar/           # THE ONLY place Viro is imported (see §9.3)
-│       │   │   ├── ArenaSession.tsx     # Viro scene: marker, sprites, effects
+│       │   │   ├── ArenaSession.tsx     # Viro scene: marker, default GLB, effects
 │       │   │   ├── coordinates.ts       # pure: marker-space conversions
 │       │   │   └── types.ts             # ArSessionState contract
-│       │   ├── net/          # colyseus.js wrapper: connect, reconnect, send/on
+│       │   ├── net/          # @colyseus/sdk wrapper: connect, reconnect, send/on
 │       │   ├── store/        # zustand stores (session, battle)
 │       │   └── components/   # HUD, crosshair, health bars, buttons
 │       └── assets/
 │           ├── marker/       # marker image + printable PDF (see §5.2)
-│           └── sprites/      # characters, effects, sounds
+│           └── characters/   # bundled default GLB, P1 cosmetics, effects, sounds
 ```
 
 Root scripts: `npm run server` (ts-node/tsx dev server), `npm run mobile` (expo start --dev-client), `npm test` (vitest across workspaces), `npm run typecheck`.
@@ -155,7 +155,7 @@ flowchart LR
         SCREENS["Screens + HUD<br/>(React Native)"]
         STORE["zustand stores"]
         ARM["ar/ module<br/>(only Viro importer)"]
-        NETC["net/ module<br/>(colyseus.js)"]
+        NETC["net/ module<br/>(@colyseus/sdk)"]
         SCREENS --> STORE
         ARM --> STORE
         STORE --> NETC
@@ -203,6 +203,17 @@ export const WEAPONS = {
 } as const;
 
 export const PLAYER_HIT_RADIUS_M = 0.45;      // deliberately generous; M0 may raise it
+
+export const QUIZ = {
+  TEMPLATE_ID: "programming-fundamentals-v1",
+  BASIC_QUESTION_MS: 30_000,
+  DIFFICULT_QUESTION_MS: 45_000,
+  REVEAL_MS: 5_000,
+} as const;
+
+export const AIM = {
+  MIN_HORIZONTAL_MAGNITUDE: 0.1, // reject nearly vertical camera-forward vectors
+} as const;
 ```
 
 ### 7.2 Protocol (all messages typed in one file)
@@ -213,8 +224,9 @@ export const PLAYER_HIT_RADIUS_M = 0.45;      // deliberately generous; M0 may r
 | C→S | `join_room` | `{ code, displayName }` |
 | Organizer→S | `set_combat_included` | `{ playerId, included }` — quiz-only players remain in the room but are excluded from battle readiness |
 | Organizer→S | `configure_arena` | `{ radiusM }` |
-| Organizer→S | `advance_phase` | `{ to: "quiz" \| "localization" }` |
-| C→S | `quiz_submit` | `{ answers: number[] }` |
+| Organizer→S | `select_quiz_template` | `{ templateId: "programming-fundamentals-v1", sessionName?: string }` |
+| Organizer→S | `start_quiz` | `{}` — freezes the participant cohort and starts the server clock |
+| C→S | `quiz_answer` | `{ questionId, optionId }` — exactly one answer before the authoritative deadline |
 | C→S | `localization_changed` | `{ state: "searching" \| "localized" \| "lost" }` |
 | C→S | `lock_position` | `{ x, z }` (marker-relative metres) |
 | C→S | `unlock_position` | `{}` |
@@ -226,10 +238,10 @@ export const PLAYER_HIT_RADIUS_M = 0.45;      // deliberately generous; M0 may r
 | S→C | `battle_completed` | `{ winnerId, standings }` |
 | S→C | `error` | `{ code, message }` (typed error codes, e.g. `POSITION_OUT_OF_BOUNDS`, `SPACING_VIOLATION`, `ROOM_FULL`) |
 
-Continuous state (player list, combat inclusion, phases, HP, positions, `startsAt`, and `serverNow`) flows through Colyseus **state sync**, not messages; messages are for discrete commands/events only. Clients calculate a server-time offset from the latest `serverNow` before rendering the countdown. This keeps LAN traffic tiny (PRD §9 reliability).
+Continuous state (player list, combat inclusion, phases, HP, positions, `startsAt`, `serverNow`, and public quiz state) flows through Colyseus **state sync**, not messages; messages are for discrete commands/events only. Clients calculate a server-time offset from the latest `serverNow` before rendering the countdown and quiz timers. This keeps LAN traffic tiny (PRD §9 reliability).
 
 ### 7.3 Core types
-`PlayerState` includes `combatIncluded: boolean` (default true); quiz-only players are excluded from arena capacity, positioning, and start gating. `RoomState` keeps phases `lobby → quiz → localization → positioning → countdown → battle → results`, and includes `serverNow` for client countdown alignment. `ArenaState` is `{ radiusM, status }` — no `cloudAnchorId`; the marker needs no server-side identity.
+`PlayerState` includes `combatIncluded: boolean` (default true); quiz-only players are excluded from arena capacity, positioning, and start gating. `RoomState` keeps phases `lobby → quiz → localization → positioning → countdown → battle → results`, and includes `serverNow` for client time alignment. `QuizState` includes `templateId`, `status`, `questionIndex`, a public current-question projection, `questionEndsAt`, and `revealEndsAt`; answer keys stay server-private until the reveal. `ArenaState` is `{ radiusM, status }` — no `cloudAnchorId`; the marker needs no server-side identity.
 
 ---
 
@@ -262,7 +274,7 @@ No AR concepts, no camera data, no trust in client-computed hits, no persistence
 - `battleStore` — high-frequency local data: my live aim direction, predicted target, effect queue. Kept separate so 10 Hz aim updates don't re-render lobby UI.
 
 ### 9.2 Screens (React Navigation, ~10)
-Home → Create/Join → Lobby (organizer variant shows minimap + phase controls) → Quiz → shield reward summary → Marker scan (guided) → Position lock → Battle (AR view + HUD) → Results. P0 uses a default avatar. Eliminated players stay on Battle behind a non-interactive eliminated overlay with live standings; free spectator navigation is P1. Screens are deliberately thin — logic lives in stores/shared.
+Home → Create/Join → Lobby (organizer variant selects and starts the fixed quiz, then shows minimap + phase controls) → Quiz → shield reward summary → Marker scan (guided) → Position lock → Battle (AR view + HUD) → Results. P0 renders one bundled default GLB avatar. Eliminated players stay on Battle behind a non-interactive eliminated overlay with live standings; free spectator navigation is P1. Screens are deliberately thin — logic lives in stores/shared.
 
 ### 9.3 The AR contract (only Viro importer)
 
@@ -280,12 +292,12 @@ export interface ArPose {
 }
 ```
 
-`ArenaSession.tsx` (Viro scene) responsibilities: track the marker → capture `T_marker` → convert camera pose each frame via `coordinates.ts` → publish `ArPose` to `battleStore` at 10 Hz → render opponents (billboard sprite + name + HP bar at each opponent's marker-space position), boundary ring, and pooled attack/hit effects.
+`ArenaSession.tsx` (Viro scene) responsibilities: track the marker → capture `T_marker` → convert camera pose each frame via `coordinates.ts` → publish `ArPose` to `battleStore` at 10 Hz → render opponents (bundled GLB + name + HP bar at each opponent's marker-space position), boundary ring, and pooled attack/hit effects. The aim calculation projects camera forward onto X/Z before sending; avatar height, mesh, and bones never affect a hit.
 
 `coordinates.ts` is pure math, ported from v1 §14 with the marker as origin:
 - **Lock position:** `p_camera_marker = inverse(T_marker) × p_camera_local` → store `(x, z)`.
 - **Aim:** rotate camera forward into marker space, project to floor, normalize.
-- **Render opponent:** `T_marker × [opp.x, SPRITE_HEIGHT, opp.z]`.
+- **Render opponent:** `T_marker × [opp.x, AVATAR_HEIGHT_M, opp.z]`.
 Unit-tested against hand-computed fixtures (identity, translated, rotated marker poses) before ever running on a device.
 
 ### 9.4 Battle HUD
@@ -337,7 +349,7 @@ Strict order within milestones; nothing starts before its predecessor's exit cri
 7. Multi-device testing, tuning (hit radii, cooldowns), demo rehearsal ×2.
 
 ### M2 — Hardening *(exit: a stranger runs a session from a one-page guide)*
-Fireball + charges; 3 sprites + colors; spectator mode; **minimap fallback mode** with its own mode, assignment, and readiness protocol; tracking-loss pause + re-scan; organizer remove/reset; reconnection polish; the one-page organizer guide.
+Fireball + charges; three selectable bundled GLB cosmetics + palettes; spectator mode; **minimap fallback mode** with its own mode, assignment, and readiness protocol; tracking-loss pause + re-scan; organizer remove/reset; reconnection polish; the one-page organizer guide.
 
 ---
 

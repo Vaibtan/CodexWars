@@ -12,7 +12,7 @@ Three layers, one hard rule per boundary:
 
 | Layer | Owns | Hard rule |
 |---|---|---|
-| **AR presentation** (`mobile/src/ar/`) | Marker tracking, coordinate conversion, rendering sprites/effects in camera space | Only place Viro is imported. Publishes plain 2D data; never touches the network. |
+| **AR presentation** (`mobile/src/ar/`) | Marker tracking, coordinate conversion, rendering bundled GLBs/effects in camera space | Only place Viro is imported. Publishes plain 2D data; never touches the network. |
 | **Game client** (`mobile/src/{screens,store,net}`) | UI, local state, Colyseus connection | Never imports Viro types. Treats AR as a sensor behind the `ArSessionState`/`ArPose` contract. |
 | **Authoritative server** (`server/`) | Rooms, phase machine, validation, combat, results | Never knows AR exists. Consumes marker-relative 2D coordinates as opaque numbers. |
 
@@ -56,14 +56,14 @@ Identical, except the Colyseus server moves to a small VPS/PaaS node and phones 
 flowchart TB
     subgraph MOBILE["apps/mobile"]
         subgraph AR["ar/ (Viro boundary)"]
-            SESSION["ArenaSession.tsx<br/>marker tracking, sprite/effect rendering"]
+            SESSION["ArenaSession.tsx<br/>marker tracking, GLB/effect rendering"]
             COORD["coordinates.ts<br/>pure marker-space math"]
         end
         subgraph CORE["app core"]
             SCREENS["screens/ (~10, thin)"]
             SSTORE["store/sessionStore<br/>room mirror, phase, players"]
             BSTORE["store/battleStore<br/>10Hz aim, predicted target, effect queue"]
-            NET["net/ (colyseus.js wrapper)<br/>connect · state-sync · messages · reconnect"]
+            NET["net/ (@colyseus/sdk wrapper)<br/>connect · state-sync · messages · reconnect"]
             HUD["components/<br/>crosshair, HP bars, fire buttons"]
         end
     end
@@ -142,6 +142,7 @@ sequenceDiagram
     Note over B: ar/ publishes ArPose at ~10Hz continuously
     HUD->>B: fire pressed
     B->>B: read latest aimDir; run shared resolveAttack for prediction
+    Note over B: project camera forward onto X/Z; discard vertical pitch
     B->>N: attack {weapon, dirX, dirZ, predictedTargetId}
     N->>SRV: forward
     SRV->>SRV: validate at server receipt: phase=battle, now≥startsAt,<br/>alive, cooldown elapsed, charges>0, |dir|≈1
@@ -191,7 +192,7 @@ sequenceDiagram
     alt phase = battle
         SRV->>SRV: start DISCONNECT_ELIMINATION_MS timer (20s)
     end
-    alt reconnects in time (colyseus.js auto-reconnection)
+    alt reconnects in time (@colyseus/sdk auto-reconnection)
         P->>SRV: reconnect with session token
         SRV->>SRV: onReconnect: reattach to same PlayerState, connected=true
         SRV-->>P: full state sync (position, HP, charges intact)
@@ -253,7 +254,7 @@ joined → quiz_done → localized → positioned → ready ──battle──�
 
 ### 6.1 Coordinate spaces
 1. **Device-local AR space** — each phone's private Viro world; arbitrary origin; never leaves `ar/`.
-2. **Marker space** — the shared 2D floor frame: origin at the printed marker's center, axes from its orientation (asymmetric marker ⇒ unambiguous). All network coordinates are marker-space `(x, z)` metres. Conversions (`coordinates.ts`, from BUILD_SPEC §9.3): position lock = `inverse(T_marker) × cameraPose`; rendering = `T_marker × [x, SPRITE_HEIGHT, z]`.
+2. **Marker space** — the shared 2D floor frame: origin at the printed marker's center, axes from its orientation (asymmetric marker ⇒ unambiguous). All network coordinates are marker-space `(x, z)` metres. Conversions (`coordinates.ts`, from BUILD_SPEC §9.3): position lock = `inverse(T_marker) × cameraPose`; rendering = `T_marker × [x, AVATAR_HEIGHT_M, z]`.
 3. **Server space** — identical to marker space; the server just does 2D geometry on the numbers.
 
 Y is discarded at the `ar/` boundary. There is no coordinate translation on the server, no per-device calibration data to sync, and no shared state beyond what Colyseus already syncs.

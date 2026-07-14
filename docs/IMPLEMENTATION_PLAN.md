@@ -1,49 +1,46 @@
 # CodexWars — P0 Implementation Plan
 
-**Status:** Execution plan — no feature implementation has started from this plan  
+**Status:** Execution plan — Firebase Admin scaffold exists; P0 feature implementation has not started
 **Last updated:** 2026-07-14  
 **Sources of truth:** [`PRD.md`](../PRD.md), [`BUILD_SPEC.md`](../BUILD_SPEC.md), [`ARCHITECTURE.md`](../ARCHITECTURE.md), and [`AR_IMPLEMENTATION_SPEC.md`](AR_IMPLEMENTATION_SPEC.md)
 
-`CODEXWARS_PRD_TDD.md` is retired historical material. If it differs from an active document, the active document wins.
+[`archive/CODEXWARS_PRD_TDD_v1.md`](archive/CODEXWARS_PRD_TDD_v1.md) is retired historical material. If it differs from an active document, the active document wins.
 
 ## 1. Scope decisions and guardrails
 
 This plan preserves the current product architecture while incorporating the requested quiz flow.
 
 1. **P0 is mixed-platform.** Every device milestone requires one physical ARCore Android phone and one physical ARKit iPhone. Android builds locally; iOS development and rehearsal builds use EAS/TestFlight.
-2. **Live authority stays in Colyseus.** The `WarRoom` is the sole writer for room phase, quiz clock, answers/scores, rewards, positions, HP, eliminations, and winner. Firebase never resolves a game action.
-3. **Firebase is optional persistence, not a P0 dependency.** Firebase JS is initialized behind configuration in the React Native app; Firebase Admin is available only behind a server repository interface. The LAN demo must run with no Firebase configuration or internet connection.
+2. **Live authority stays in Colyseus.** The `WarRoom` is the sole writer for room phase, quiz clock, answers/scores, rewards, positions, HP, eliminations, and winner.
+3. **Firebase is deferred outside P0/M2.** P0 and M2 are LAN-only and in-memory, with no Firebase JS initialization, Firestore reads/writes, or runtime internet requirement. The existing Firebase Admin scaffold is intentionally unused until a P2 persistence and privacy decision.
 4. **“Organizer creates a quiz” means creates a quiz session from the bundled ten-question Programming Fundamentals quiz.** The organizer may name the session and start it, but arbitrary question authoring remains P2 per the PRD. This avoids accidentally adding accounts, permissions, and a content-management system to P0.
-5. **The requested ten-question flow supersedes the former three-question demo count.** Before implementation, update the PRD/Build Spec to make this an approved P0 amendment. The deterministic shield-only reward economy remains unchanged in principle.
-6. **P0 AR uses the default sprite/avatar.** The GLB character pipeline in `AR_IMPLEMENTATION_SPEC.md` is P1/M2 work. P0 may use simple Viro primitives only for the M0 tracking diagnostic.
+5. **The P0 quiz is locked.** `programming-fundamentals-v1` has ten questions: seven 30-second basic/intermediate questions, three 45-second difficult questions, and a five-second automatic reveal. Shield rewards are 0/10/20/30/40 for score bands 0–2/3–4/5–6/7–8/9–10.
+6. **P0 AR renders one bundled default GLB avatar.** M0 uses only diagnostic primitives; after M0 go/conditional-go, P0 renders the default GLB. P1 adds three selectable bundled GLB cosmetics and palette choice. GLBs never define hitboxes or combat logic.
 7. **Area scan means marker acquisition, not room meshing.** The client guides the user to scan the printed asymmetric A4 marker and nearby visual features until it obtains `T_marker`; it does not reconstruct the room or detect people.
 
 ## 2. Dependency graph and execution order
 
-The user-visible order is: Hello World → Firebase JS + multiplayer foundation → quiz in parallel → full AR/gameplay. The technical order additionally starts the small M0 AR spike as soon as the first native builds exist, because marker colocation is the only project-killing uncertainty.
+The execution order is strict: Hello World → M0 marker-colocation gate → shared multiplayer foundation → quiz and lobby in parallel → AR/gameplay. M0 is the project-killing uncertainty, so no feature work begins before its go/conditional-go decision.
 
 ```mermaid
 flowchart TD
-    A["0. Approve P0 amendments<br/>10-question session + optional Firebase"]
+    A["0. Locked P0 decisions<br/>10-question template + default GLB"]
     B["1. Expo Hello World<br/>Android and iOS native dev builds"]
-    C["2. Shared workspace + Firebase adapters<br/>feature-gated, no game authority"]
-    D["3. Colyseus lobby foundation<br/>room code, join, state sync, reconnect"]
-    E["M0 AR spike<br/>Android-to-iPhone marker measurements"]
-    F["4A. Quiz track<br/>10-question server clock, scoring, rewards"]
-    G["4B. Mobile lobby track<br/>join/create, organizer controls, quiz UI"]
-    H["5. Quiz-to-localization integration<br/>combat inclusion and start invariant"]
-    I["6. AR positioning<br/>marker pose, lock X/Z, minimap"]
-    J["7. Authoritative battle<br/>aim, hit resolution, HP, elimination"]
-    K["8. Results + winner animation<br/>mixed-device rehearsals"]
+    C["M0 AR spike<br/>Android-to-iPhone marker measurements"]
+    D["2. Shared + Colyseus foundation<br/>room code, join, state sync, reconnect"]
+    E["3A. Quiz track<br/>10-question server clock, scoring, rewards"]
+    F["3B. Mobile lobby track<br/>join/create, organizer controls, quiz UI"]
+    G["4. Quiz-to-localization integration<br/>combat inclusion and start invariant"]
+    H["5. AR positioning + default GLB<br/>marker pose, lock X/Z, minimap"]
+    I["6. Authoritative battle<br/>2D aim, hit resolution, HP, elimination"]
+    J["7. Results + winner animation<br/>mixed-device rehearsals"]
 
     A --> B --> C --> D
-    B --> E
+    D --> E
     D --> F
-    D --> G
-    E --> I
-    F --> H
-    G --> H
-    H --> I --> J --> K
+    E --> G
+    F --> G
+    G --> H --> I --> J
 ```
 
 `E` is a hard gate: if M0 is a no-go, stop AR P0 and obtain an explicit revised-product decision. Do not build rich AR gameplay around an unproven coordinate system.
@@ -59,15 +56,13 @@ apps/
       components/                 # plain RN UI; no Viro imports
       ar/                         # the only Viro importer
       net/                        # @colyseus/sdk client wrapper
-      firebase/                   # feature-gated Firebase JS initialization
       store/                      # sessionStore and battleStore
   server/                         # Node/TypeScript Colyseus server
     src/
       rooms/WarRoom.ts
       schema/                     # Colyseus state definitions
-      quiz/                       # question bank, scoring, repository interface
-      persistence/                # in-memory default; optional Firestore adapter
-      firebase.ts                 # Admin initialization only for optional adapter
+      quiz/                       # bundled question bank, scoring, session clock
+      firebase.ts                 # deferred P2 scaffold; not imported by P0/M2 runtime
 packages/
   shared/
     src/
@@ -85,21 +80,21 @@ docs/
 
 ## 4. Phase 0 — approve and prepare
 
-### 4.1 Amend the active specifications before code
+### 4.1 Locked active specifications
 
 Record these decisions in `PRD.md` and `BUILD_SPEC.md`:
 
 - P0 quiz is a **bundled ten-question Programming Fundamentals session** created and started by the organizer.
 - Standard questions use a 30-second server clock; difficult questions use 45 seconds.
-- Firebase is optional and non-authoritative; P0 live play remains LAN-only and in-memory.
-- Replace the legacy `colyseus.js` 0.16 client recommendation with a pinned `@colyseus/sdk` version compatible with Colyseus 0.17, then lock and test the exact pair.
+- Firebase is deferred outside P0/M2; P0 live play is LAN-only and in-memory.
+- Mobile networking uses `@colyseus/sdk` 0.17.43 with Colyseus server 0.17.10; the first networking spike verifies the exact pinned pair.
 
 ### 4.2 Accounts, devices, and configuration
 
 - Obtain an ARCore-certified Android test phone and a designated ARKit-compatible iPhone.
 - Configure the Expo account, EAS project, Apple Developer signing, iPhone registration, and internal TestFlight access.
 - Prepare a non-isolated hotspot and record the Windows laptop’s private LAN IP.
-- Add `.env.example` entries for the local server URL and optional Firebase client/server configuration. No secrets enter source control.
+- Add `.env.example` entries for the local server URL only. No secrets enter source control.
 - Set up CI for typecheck, unit tests, and server integration tests. Device testing remains a dated manual checklist.
 
 **Exit:** both native development builds can display the same static app screen on their physical devices.
@@ -125,39 +120,21 @@ This is intentionally the first implementation task.
 - Navigation, TypeScript build, and a basic component test are green.
 - Any native config change has a documented Android rebuild and iOS EAS-build step.
 
-## 6. Phase 2 — Firebase JS and multiplayer foundation
+## 6. Phase 2 — shared contract and multiplayer foundation
 
-### 6.1 Firebase integration: constrained role
+Firebase is intentionally absent from this phase. The existing Admin bootstrap remains an unimported P2 candidate; it must not be added to the P0 mobile bundle, server startup path, or environment configuration.
 
-Implement Firebase in two separate adapters:
-
-| Adapter | Runs in | P0 responsibility | Explicitly must not do |
-|---|---|---|---|
-| `mobile/src/firebase/client.ts` | React Native | Initialize Firebase JS only when public config exists; expose an optional quiz-template read client for development/admin tooling | Store player positions, answers, HP, room phase, or combat events |
-| `server/src/persistence/firestoreQuizRepository.ts` | Node server | Optional durable storage for organizer-created session metadata or approved quiz templates after a server-side decision | Become the source of truth for an active room or be required for LAN demo play |
-
-Use an interface from day one:
-
-```ts
-interface QuizRepository {
-  getTemplate(templateId: string): Promise<QuizTemplate | null>;
-  saveSessionMetadata?(metadata: CompletedQuizMetadata): Promise<void>;
-}
-```
-
-`InMemoryQuizRepository` is the P0 default. `FirestoreQuizRepository` is selected only by server configuration. Participants have no direct Firestore writes and no Firebase account requirement.
-
-### 6.2 Shared game contract
+### 6.1 Shared game contract
 
 Create `packages/shared` before the server or screens grow:
 
 - `RoomPhase = lobby | quiz | localization | positioning | countdown | battle | results`.
 - `PlayerState` with nickname, role, `combatIncluded`, `quizCompleted`, `quizScore`, shield/HP, position, ready, connected, and eliminated fields.
-- `QuizState` with a public current question snapshot, `questionIndex`, `questionEndsAt`, `status`, and public score/reward summaries after completion.
+- `QuizState` with `templateId`, a public current-question snapshot, `questionIndex`, `questionEndsAt`, `revealEndsAt`, `status`, and public score/reward summaries after completion.
 - Server-private answer keys only; never sync correct answers before expiry.
 - Constants for capacity (12), countdown (5 s), battle (60 s), reconnect grace (20 s), question/reveal durations, shield rewards, and all combat values.
 
-### 6.3 Colyseus room foundation
+### 6.2 Colyseus room foundation
 
 Implement `WarRoom` and a mobile `warRoomClient` wrapper using the pinned `@colyseus/sdk`.
 
@@ -171,21 +148,20 @@ Implement `WarRoom` and a mobile `warRoomClient` wrapper using the pinned `@coly
 
 - An Android and iPhone can join the same laptop-hosted room over the hotspot.
 - Both render the same roster/phase and reconnect to the same player record.
-- Firebase disabled does not prevent the room or quiz template from working.
-- No active combat or quiz state is written directly by Firebase clients.
+- The app and server start with no Firebase configuration, internet access, or Firebase imports on the P0 runtime path.
 
 ## 7. Phase 3 — hosted ten-question Programming Fundamentals quiz
 
-This work starts after the multiplayer contract exists and can run in parallel with the M0 AR spike and mobile lobby polish.
+This work starts only after the M0 go/conditional-go decision and multiplayer contract exist; it can run in parallel with mobile lobby polish.
 
 ### 7.1 Quiz session behavior
 
 1. Organizer creates a room and selects **Programming Fundamentals — 10 questions**.
-2. This creates an in-memory `QuizSession` from the bundled template and optionally records metadata through the repository.
+2. This creates an in-memory `QuizSession` from the bundled template.
 3. Organizer presses **Start Quiz**. The server freezes the participant cohort and sets `phase = quiz`.
 4. The server broadcasts only one public question at a time and authoritative `questionEndsAt`.
 5. Each participant may submit exactly one selected option before the deadline. Late, duplicate, malformed, or wrong-phase submissions receive a typed error and do not change score.
-6. At expiry, the server scores all submissions, reveals the correct answer and explanation for five seconds, then advances automatically. The organizer can use **Next** only after the reveal; it cannot extend a live deadline.
+6. At expiry, the server scores all submissions, reveals the correct answer and explanation for five seconds, then advances automatically. There is no organizer **Next** command and no way to extend a live deadline.
 7. After question 10, the server calculates shield rewards, marks quiz completion, and moves the room to localization.
 
 ### 7.2 Time model
@@ -241,9 +217,9 @@ Every player starts with 100 HP. Shield is additive protection, not additional H
 - Unit tests: no correct answer leaks, deadline boundary, duplicate submission, reward bands, disconnect/missing answer, and question-order determinism.
 - Integration tests: organizer start, every participant answer path, expiry scoring, client reconnection, completion-to-localization transition.
 
-## 8. Phase 4 — M0 AR marker-colocation spike
+## 8. M0 gate — AR marker-colocation spike (executed immediately after Phase 1)
 
-Run this in parallel with the quiz track immediately after native Hello World works; it blocks later AR gameplay but does not block lobby/quiz development.
+This is the only work after Hello World. It blocks all multiplayer, quiz, lobby, and AR feature development until its go/conditional-go decision is recorded.
 
 ### Build only the diagnostic scene
 
@@ -289,17 +265,17 @@ One Android and one iPhone can localize, lock distinct valid positions, see each
 
 ### 10.1 Rendering other players
 
-- Render the P0 default sprite/avatar below the marker node at each server-synchronized marker-relative X/Z position.
+- Render the P0 bundled default GLB avatar below the marker node at each server-synchronized marker-relative X/Z position.
 - Render name, HP, and shield as camera-facing billboards; do not use color alone to communicate targeting.
 - Draw boundary ring and use a camera-centre crosshair. Client prediction can highlight a target but cannot mutate gameplay state.
-- Use pooled flash/bolt/hit effects and sound/haptics. Do not add GLB character models, mesh colliders, depth occlusion, or physics projectiles in P0.
+- Use pooled flash/bolt/hit effects and sound/haptics. Do not add mesh/bone colliders, depth occlusion, or physics projectiles in P0; the GLB is presentation only.
 
 ### 10.2 Combat sequence
 
 1. Organizer presses Start Battle only after each combat-included player is connected, localized, quiz-complete, positioned, and ready.
 2. Server emits `startsAt = serverNow + 5 s`; clients render the same countdown from their calculated server-time offset.
-3. Fire button reads the latest local marker-relative direction and sends `attack { weapon, dirX, dirZ, predictedTargetId? }`.
-4. Server validates phase, start time, aliveness, cooldown, normalized direction, and then resolves nearest ray-vs-circle hit at server receipt time.
+3. Fire button projects the camera forward vector onto X/Z, discards vertical pitch, and sends `attack { weapon, dirX, dirZ, predictedTargetId? }`. Looking above/below a model's head has no effect when that floor-plane direction is unchanged. If the horizontal projection is below `AIM.MIN_HORIZONTAL_MAGNITUDE`, fire is disabled with an "aim level" cue instead of falling back to a 3D ray.
+4. Server validates phase, start time, aliveness, cooldown, normalized direction, and then resolves nearest ray-vs-circle hit at server receipt time. GLB vertices, height, bounds, and bones are ignored.
 5. Server applies shield before HP, broadcasts `attack_resolved`, and updates synchronized state.
 6. Clients play persistent hit/elimination effects only from the authoritative event/state. A predicted miss or hit may never change HP locally.
 
@@ -307,7 +283,7 @@ One Android and one iPhone can localize, lock distinct valid positions, see each
 
 - At `hp = 0`, the server sets `eliminated = true`; the defeated player cannot fire.
 - The defeated phone shows the P0 non-interactive eliminated overlay with live standings. It remains connected and sees the final result.
-- Other phones render a short sprite fade/flash at the eliminated player’s locked position.
+- Other phones render a short GLB fade/flash at the eliminated player’s locked position.
 - When one player remains or the 60-second server timer ends, the server applies the highest-HP then quiz-score tie-break, broadcasts `battle_completed`, and freezes battle controls.
 - Results screen plays one bounded winner animation: camera HUD confetti/flash, winner nickname, final standings, and **Run Another Round** for organizer reset. The animation is presentation only; no new gameplay messages are emitted.
 
@@ -321,12 +297,12 @@ One Android and one iPhone can localize, lock distinct valid positions, see each
 
 | Lane | Starts after | Owns | Must not change |
 |---|---|---|---|
-| Mobile shell / lobby | Hello World | navigation, create/join, roster, organizer controls | AR types or server authority |
-| Server / shared game core | workspace setup | schemas, room lifecycle, quiz, combat, tests | Viro imports or UI decisions |
+| M0 AR spike | Hello World | marker candidate, camera/marker transforms, measurements | network protocol or gameplay rules |
+| Mobile shell / lobby | M0 conditional/go | navigation, create/join, roster, organizer controls | AR types or server authority |
+| Server / shared game core | M0 conditional/go | schemas, room lifecycle, quiz, combat, tests | Viro imports or UI decisions |
 | Quiz | Colyseus contract | template, clock, scoring, rewards, quiz screens | AR coordinate math |
-| M0 AR spike | native dev builds | marker candidate, camera/marker transforms, measurements | network protocol or gameplay rules |
-| AR presentation | M0 conditional/go + position state | Viro scene, sprites, effects, HUD feed | HP, hit, winner authority |
-| Firebase adapter | shared repository interface | optional persistence/configuration path | live room state or participant data writes |
+| AR presentation | M0 conditional/go + position state | Viro scene, default GLB, effects, HUD feed | HP, hit, winner authority |
+| Firebase (P2 candidate) | explicit product/privacy decision | optional persistence evaluation | P0/M2 runtime, live room state, or participant data writes |
 
 ## 12. Definition of done for P0
 
@@ -335,7 +311,7 @@ P0 is done only when all of the following are true:
 1. The same installed build flow works on a physical Android phone and iPhone; the iOS rehearsal build is available through TestFlight.
 2. The M0 evidence document records a cross-platform go/conditional-go decision.
 3. Organizer can create and start the bundled ten-question Programming Fundamentals session; participants join, answer on server clocks, and receive deterministic shield rewards.
-4. Firebase is optional; disabling it does not break the LAN demo or expose participant writes.
-5. All combat-included players localize, lock valid positions, and appear on the organizer minimap.
-6. A basic-bolt attack produces the same authoritative damage state on all phones; elimination and winner results are consistent.
+4. P0/M2 runs with no Firebase configuration or runtime dependency.
+5. All combat-included players localize, lock valid positions, and appear on the organizer minimap as bundled default GLB avatars.
+6. A basic-bolt attack produces the same authoritative 2D damage state on all phones regardless of GLB mesh, bone, height, or vertical camera pitch; elimination and winner results are consistent.
 7. The full mixed-platform demo runs successfully twice in a row with no continuous AR camera session over three minutes.

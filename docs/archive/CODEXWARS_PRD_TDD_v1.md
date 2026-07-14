@@ -1,6 +1,6 @@
 # CodexWars — Retired v1 PRD/TDD
 
-> **Do not implement from this document.** It records the pre-marker, Cloud Anchor design and is retained only for historical context. The approved requirements are in `PRD.md` v2.1; the active technical specifications are `BUILD_SPEC.md` v1.1 and `ARCHITECTURE.md` v1.0. P0 now requires both Android and iOS.
+> **Do not implement from this document.** It records the pre-marker, Cloud Anchor design and is retained only for historical context. The approved requirements are in `PRD.md` v2.2; the active technical specifications are `BUILD_SPEC.md` v1.2, `ARCHITECTURE.md` v1.0, and `docs/AR_IMPLEMENTATION_SPEC.md`. P0 now requires both Android and iOS.
 
 ## Product Requirements Document and Technical Design Document
 
