@@ -1,16 +1,28 @@
-import type { ArenaPosition, CharacterColorId, CharacterId } from "./types.js";
-
-export * from "./combat.js";
-export * from "./constants.js";
-export * from "./protocol.js";
-export * from "./quiz.js";
-export * from "./types.js";
 export * from "./battle/index.js";
 export * from "./realtime/index.js";
+
+export type CharacterId = "knight" | "ninja" | "wizard";
+
+export type CharacterColorId = "gold" | "coral" | "aqua" | "violet";
 
 export interface CharacterSelection {
   characterId: CharacterId;
   colorId: CharacterColorId;
+}
+
+export type RoomPhase =
+  | "lobby"
+  | "quiz"
+  | "quiz-results"
+  | "arena-setup"
+  | "positioning"
+  | "countdown"
+  | "battle"
+  | "results";
+
+export interface ArenaPosition {
+  x: number;
+  z: number;
 }
 
 export type ParticipantReadiness = "lobby" | "quiz-ready" | "customizing" | "positioning" | "waiting";
