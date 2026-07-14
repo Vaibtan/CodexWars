@@ -7,7 +7,7 @@ workspace so mobile, server, and shared game contracts can evolve separately.
 apps/
   mobile/             Expo / React Native client
     src/
-      ar/             ARKit/ARCore renderer boundary (Viro goes here later)
+      ar/             Viro ARKit/ARCore scenes and native renderer boundary
       components/     reusable React Native UI
       config/         client configuration
       features/       quiz, lobby, battle features
@@ -28,7 +28,7 @@ packages/
 
 ## First run
 
-Use Node 22.13 or newer (Expo SDK 57 requires Node 22.13+), then install from
+Use Node 22.13 or newer, then install from
 the repository root:
 
 ```bash
@@ -36,10 +36,10 @@ npm install
 npm run mobile
 ```
 
-Open the Expo development menu and launch the Android, iOS, or web target. The
-first screen is intentionally non-AR; AR/Viro will require a native development
-build later. Run the starter backend separately with `npm run server`; its
-health endpoint is `http://localhost:4000/health`.
+Install the native development client first, then run `npm run mobile` and open
+that client on an iPhone or Android device. Viro is a native dependency, so
+Expo Go cannot load this app. Run the starter backend separately with
+`npm run server`; its health endpoint is `http://localhost:4000/health`.
 
 For the iPhone-on-macOS and Android-on-Windows development-build workflow, see
 [`docs/PLATFORM_TESTING.md`](docs/PLATFORM_TESTING.md).

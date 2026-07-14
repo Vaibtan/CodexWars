@@ -6,9 +6,10 @@ import { isFirebaseConfigured } from "../lib/firebase/client";
 
 type HomeScreenProps = {
   onOpenArDemo: () => void;
+  onOpenParticipantSetup: () => void;
 };
 
-export function HomeScreen({ onOpenArDemo }: HomeScreenProps) {
+export function HomeScreen({ onOpenArDemo, onOpenParticipantSetup }: HomeScreenProps) {
   return (
     <SafeAreaView edges={["top", "bottom"]} style={styles.screen}>
       <View style={styles.topBar}>
@@ -52,13 +53,21 @@ export function HomeScreen({ onOpenArDemo }: HomeScreenProps) {
         </View>
 
         <Pressable
-          accessibilityHint="Opens the organizer floor scan"
+          accessibilityHint="Opens character customization"
           accessibilityRole="button"
-          onPress={onOpenArDemo}
+          onPress={onOpenParticipantSetup}
           style={({ pressed }) => [styles.primaryButton, pressed && styles.primaryButtonPressed]}
         >
-          <Text style={styles.primaryButtonText}>Launch AR demo</Text>
+          <Text style={styles.primaryButtonText}>Set up participant</Text>
           <Text style={styles.primaryButtonArrow}>→</Text>
+        </Pressable>
+        <Pressable
+          accessibilityHint="Opens the organizer floor scan and lobby"
+          accessibilityRole="button"
+          onPress={onOpenArDemo}
+          style={({ pressed }) => [styles.organizerButton, pressed && styles.primaryButtonPressed]}
+        >
+          <Text style={styles.organizerButtonText}>Open organizer demo</Text>
         </Pressable>
       </View>
 
@@ -201,6 +210,20 @@ const styles = StyleSheet.create({
     color: colors.accentInk,
     fontSize: 24,
     fontWeight: "700",
+  },
+  organizerButton: {
+    alignItems: "center",
+    borderColor: colors.outline,
+    borderRadius: 14,
+    borderWidth: 1,
+    justifyContent: "center",
+    marginTop: 10,
+    minHeight: 52,
+  },
+  organizerButtonText: {
+    color: colors.ink,
+    fontSize: 15,
+    fontWeight: "800",
   },
   firebaseState: {
     color: colors.inkSubtle,

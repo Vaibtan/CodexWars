@@ -214,7 +214,7 @@ Key property: **position, HP, and rewards live on the server**, so a phone reboo
 
 ```mermaid
 stateDiagram-v2
-    [*] --> lobby: create_room
+    [*] --> lobby: authenticated organizer admission
     lobby --> quiz: organizer advance_phase
     quiz --> localization: all combat-included players quizCompleted
     localization --> positioning: arena configured ∧ players localizing

@@ -9,7 +9,7 @@ and development-build setup.
 
 - Use Node 22.23.1: from the repository root, run `nvm use`.
 - Install dependencies from the repository root with `npm install`.
-- Read the Expo SDK 57 documentation before changing Expo configuration or
+- Read the Expo SDK 54 documentation before changing Expo configuration or
   adding a native module. Use `npx expo install <package>` rather than a plain
   `npm install` for Expo/RN native packages, so Expo selects SDK-compatible
   versions.
@@ -36,7 +36,7 @@ publishes only marker-relative position/aim data and renders server-synced
 state. Do not put hit detection, authoritative state mutation, or direct
 network calls in `src/ar/`.
 
-## Run the first screen
+## Run the app
 
 From the repository root:
 
@@ -46,8 +46,9 @@ npm install
 npm run mobile
 ```
 
-Use the Expo terminal controls to open a web browser, Android device/emulator,
-or iOS simulator/device. Run the local backend separately when needed:
+Open the installed native development client on an Android or iOS device. The
+web target and Expo Go cannot load the Viro native AR module. Run the local
+backend separately when needed:
 
 ```bash
 npm run server

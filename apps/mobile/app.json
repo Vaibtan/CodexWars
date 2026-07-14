@@ -7,7 +7,6 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
-    "newArchEnabled": true,
     "ios": {
       "bundleIdentifier": "com.codexwars.app",
       "supportsTablet": true

@@ -10,6 +10,12 @@
     "node": ">=22 <23",
     "npm": ">=10"
   },
+  "overrides": {
+    "@types/react": "~19.1.10",
+    "react": "19.1.0",
+    "react-native": "0.81.5",
+    "typescript": "~5.9.2"
+  },
   "scripts": {
     "mobile": "npm run start --workspace @codexwars/mobile",
     "server": "npm run dev --workspace @codexwars/server",

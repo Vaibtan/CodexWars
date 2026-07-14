@@ -90,6 +90,7 @@ Record these decisions in `PRD.md` and `BUILD_SPEC.md`:
 - Standard questions use a 30-second server clock; difficult questions use 45 seconds.
 - Firestore persists quiz templates, submissions, and results in P0; it never owns a timer, score, reward, room phase, or combat action.
 - Mobile networking uses `@colyseus/sdk` 0.17.43 with Colyseus server 0.17.10; the first networking spike verifies the exact pinned pair.
+- `docs/API_AND_REALTIME_SPEC.md` is the authoritative HTTP admission, Colyseus state/command/event, Firestore data, and error contract. `CONTEXT.md` is the canonical product glossary.
 
 ### 4.2 Accounts, devices, and configuration
 
@@ -141,7 +142,7 @@ Create `packages/shared` before the server or screens grow:
 Implement `WarRoom` and a mobile `warRoomClient` wrapper using the pinned `@colyseus/sdk`.
 
 - Four-digit code allocation; no active collisions; two-hour idle expiry.
-- `create_room`, `join_room`, duplicate nickname suffixing, capacity rejection, `set_combat_included`, and typed errors.
+- Authenticated HTTP room creation and join-by-code seat reservations, followed by `consumeSeatReservation`; duplicate nickname suffixing, capacity rejection, `set_combat_included`, and typed errors.
 - State synchronization for public room/player state and `serverNow`/`startsAt` time offset.
 - `onDrop` → `allowReconnection` → `onReconnect` lifecycle. Disable controls while disconnected and discard queued attack commands on reconnect.
 - Lobby UI: create/join form, code display, live roster, connection state, quiz-only toggle, and organizer-only phase controls.

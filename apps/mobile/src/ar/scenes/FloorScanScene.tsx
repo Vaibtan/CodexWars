@@ -6,27 +6,14 @@ import {
   ViroMaterials,
   ViroQuad,
   ViroText,
-  ViroTrackingStateConstants,
 } from "@reactvision/react-viro";
-import type { ArTrackingState } from "../types";
-import { getSceneBridge, type ArSceneProps } from "./sceneBridge";
+import { getSceneBridge, mapViroTrackingState, type ArSceneProps } from "./sceneBridge";
 
 ViroMaterials.createMaterials({
   arenaFloorFound: {
     diffuseColor: "#FFCC4D",
-    transparency: 0.58,
   },
 });
-
-function mapTrackingState(state: number): ArTrackingState {
-  if (state === ViroTrackingStateConstants.TRACKING_NORMAL) {
-    return "normal";
-  }
-  if (state === ViroTrackingStateConstants.TRACKING_LIMITED) {
-    return "limited";
-  }
-  return "unavailable";
-}
 
 export function FloorScanScene(props: ArSceneProps = {}) {
   const floorReported = useRef(false);
@@ -37,18 +24,19 @@ export function FloorScanScene(props: ArSceneProps = {}) {
       return;
     }
     floorReported.current = true;
-    bridge?.onFloorFound();
+    bridge?.onFloorFound?.();
   };
 
   return (
     <ViroARScene
-      onTrackingUpdated={(state) => bridge?.onTrackingChanged(mapTrackingState(state))}
+      onTrackingUpdated={(state) => bridge?.onTrackingChanged(mapViroTrackingState(state))}
     >
       <ViroAmbientLight color="#FFFFFF" intensity={180} />
       <ViroARPlane minHeight={0.5} minWidth={0.5} onAnchorFound={handleFloorFound}>
         <ViroQuad
           height={1.4}
           materials={["arenaFloorFound"]}
+          opacity={0.58}
           position={[0, 0.005, 0]}
           rotation={[-90, 0, 0]}
           width={1.4}

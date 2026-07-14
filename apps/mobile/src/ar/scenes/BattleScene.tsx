@@ -7,7 +7,7 @@ import {
   ViroSphere,
   ViroText,
 } from "@reactvision/react-viro";
-import { getSceneBridge, type ArSceneProps } from "./sceneBridge";
+import { getSceneBridge, mapViroTrackingState, type ArSceneProps } from "./sceneBridge";
 
 ViroMaterials.createMaterials({
   opponentCoral: { diffuseColor: "#FF6B7A", lightingModel: "Lambert" },
@@ -27,7 +27,9 @@ export function BattleScene(props: ArSceneProps = {}) {
   const bridge = getSceneBridge(props);
 
   return (
-    <ViroARScene onTrackingUpdated={() => bridge?.onTrackingChanged("normal")}>
+    <ViroARScene
+      onTrackingUpdated={(state) => bridge?.onTrackingChanged(mapViroTrackingState(state))}
+    >
       <ViroAmbientLight color="#FFFFFF" intensity={210} />
       {opponents.map((opponent) => (
         <ViroNode key={opponent.name} position={opponent.position}>

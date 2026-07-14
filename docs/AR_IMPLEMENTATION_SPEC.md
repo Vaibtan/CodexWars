@@ -15,7 +15,7 @@ The PRD establishes the following constraints:
 - Players lock a stationary marker-relative position before battle. They rotate to aim but do not walk during combat.
 - The server receives only marker-relative X/Z positions and a normalized aim direction when an attack is fired. It computes hits, shields, HP, eliminations, and winners.
 - Camera frames never leave the device. There is no face/body recognition.
-- P0 renders one bundled default GLB avatar after M0 proves Android-to-iPhone marker colocation. Character choice and three additional selectable GLB cosmetics are P1 work, after M1 proves the complete battle loop.
+- P0 acceptance requires one bundled fallback GLB avatar after M0 proves Android-to-iPhone marker colocation. The current demo may enable the approved bundled cosmetics as non-blocking presentation work; selection never changes gameplay or the P0 battle gate.
 
 Therefore, a GLB is never a source of gameplay truth. It is a local visual representation of a server-owned `characterId` at a server-owned arena position.
 
@@ -39,7 +39,7 @@ Viro is native code. The mobile app must run in an installed Expo development bu
 
 ### 3.1 Character selection lifecycle
 
-Character selection is a P1 presentation/loadout field. It does not change damage, collision radius, range, cooldown, shield, quiz reward, or hit resolution.
+Character selection is a presentation-only field. It does not change damage, collision radius, range, cooldown, shield, quiz reward, or hit resolution. P0 remains complete with the fallback selection; enabling the approved catalog does not promote Character into gameplay state.
 
 ```mermaid
 sequenceDiagram
@@ -49,13 +49,13 @@ sequenceDiagram
     participant AR as ArenaSession (Viro)
 
     P->>C: Select character before localization
-    C->>S: select_character {characterId}
+    C->>S: select_character {requestId, characterId, colorId}
     S->>S: Validate phase, eligibility, and catalog ID
-    S-->>C: State sync: player.characterId
+    S-->>C: State sync: player.characterId, player.characterColorId
     C->>C: Preload local/approved GLB asset
     Note over P,AR: Every player scans the same floor marker
     AR->>C: Marker-relative pose and localization state
-    S-->>C: State sync: every player's position, HP, shield, characterId
+    S-->>C: State sync: every player's position, HP, shield, characterId, characterColorId
     C->>AR: Render each opponent's GLB at their marker-relative position
     P->>C: Press fire
     C->>S: attack {weapon, dirX, dirZ, predictedTargetId?}
@@ -64,7 +64,7 @@ sequenceDiagram
     C->>AR: Play local projectile/hit/elimination visual
 ```
 
-`select_character` is accepted only before the room enters `positioning` (recommended) or before `countdown` (permissible if UI requires it). Once countdown begins, the server freezes `characterId` for the match. This prevents late asset loads and ensures the organizer/minimap sees stable player identity.
+`select_character` is accepted only before the room enters `positioning` (recommended) or before `countdown` (permissible if UI requires it). Once countdown begins, the server freezes `characterId` and `characterColorId` for the match. This prevents late asset loads and ensures the organizer/minimap sees stable player identity.
 
 ### 3.2 Same character on every phone
 
@@ -81,17 +81,21 @@ The server does not inspect GLB files and does not know ARKit, ARCore, Viro, mes
 
 ## 4. Asset contract
 
-### 4.1 P0 default and P1 catalog
+### 4.1 P0 fallback and enabled cosmetic catalog
 
-Ship the `default` GLB with P0. P1 adds the three approved cosmetic characters `ember`, `moss`, and `nova`. Remote asset delivery is a P2 optimization and must retain a bundled fallback for the demo.
+The participant demo ships three Quaternius cosmetics: `knight`, `ninja`, and
+`wizard`. Each has four approved, pre-baked outfit variants: `gold`, `coral`,
+`aqua`, and `violet`. Pre-baking keeps the same appearance on ARKit and ARCore;
+remote asset delivery remains a P2 optimization.
 
 ```ts
-export type CharacterId = "default" | "ember" | "moss" | "nova";
+export type CharacterId = "knight" | "ninja" | "wizard";
+export type CharacterColorId = "gold" | "coral" | "aqua" | "violet";
 
 export interface CharacterDefinition {
   id: CharacterId;
   displayName: string;
-  glb: number; // Metro require() result; no arbitrary URL in P1
+  sources: Record<CharacterColorId, number>; // Metro require() results; no arbitrary URL in P1
   scale: readonly [number, number, number];
   yOffsetM: number;
   idleAnimation: string;
@@ -139,10 +143,9 @@ The design extends the layout in `BUILD_SPEC.md` without violating its AR bounda
 apps/mobile/
 ├── assets/
 │   └── characters/
-│       ├── default/default.glb
-│       ├── ember/ember.glb
-│       ├── moss/moss.glb
-│       └── nova/nova.glb
+│       ├── knight-gold.glb (plus coral/aqua/violet)
+│       ├── ninja-gold.glb  (plus coral/aqua/violet)
+│       └── wizard-gold.glb (plus coral/aqua/violet)
 └── src/
     ├── ar/
     │   ├── ArenaSession.tsx        # only Viro importer; scene composition
@@ -177,17 +180,20 @@ Add a required, server-owned selection field to `PlayerState`:
 interface PlayerState {
   // Existing server-owned fields: position, hp, shield, eliminated, etc.
   characterId: CharacterId;
+  characterColorId: CharacterColorId;
 }
 ```
 
-New players begin with `characterId: "default"`. This is backwards-compatible with P0 and guarantees a valid representation if P1 assets are not enabled.
+New players begin with the catalog fallback (`characterId: "knight"`, `characterColorId: "gold"` in the current manifest). This guarantees a valid representation when the participant does not customize.
 
 ### 6.2 Command
 
 ```ts
 type SelectCharacter = {
   type: "select_character";
+  requestId: string;
   characterId: CharacterId;
+  colorId: CharacterColorId;
 };
 ```
 
@@ -195,11 +201,11 @@ Server handler rules, in order:
 
 1. Require the sender to be an active participant, not organizer-only/observer.
 2. Require phase `lobby`, `quiz`, or `localization` (the final allowed list is a shared constant).
-3. Require `characterId` to appear in the server's allow-list, which is generated from the shared catalog IDs—not supplied by the client.
-4. Set `player.characterId` and allow normal Colyseus state synchronization.
+3. Require the `characterId`/`colorId` pair to appear in the server's allow-list, which is generated from the shared catalog—not supplied by the client.
+4. Set `player.characterId` and `player.characterColorId`, then allow normal Colyseus state synchronization.
 5. Reject any invalid phase or ID with a typed error; do not silently substitute another character.
 
-The server must not accept `glbUrl`, mesh customization, a transform, a scale, a hitbox, or an animation name from this message.
+The server must not accept `glbUrl`, mesh customization, a transform, a scale, a hitbox, an animation name, or any Battle Stats from this message. The complete command/error contract is defined in `API_AND_REALTIME_SPEC.md`.
 
 ### 6.3 Cosmetic customization
 

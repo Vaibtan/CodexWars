@@ -1,8 +1,10 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, type ComponentType } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { ViroARSceneNavigator } from "@reactvision/react-viro";
 import { colors } from "../components/theme";
+import { getCharacter, getCharacterColor } from "../features/characters/characterCatalog";
+import type { WaitingParticipant } from "../features/characters/types";
 import { AttackButton } from "./AttackButton";
 import { BattleScene } from "./scenes/BattleScene";
 import { FloorScanScene } from "./scenes/FloorScanScene";
@@ -10,6 +12,7 @@ import type { ArFlowPhase, ArSceneBridge, ArTrackingState, AttackId } from "./ty
 
 type ArDemoScreenProps = {
   onExit: () => void;
+  waitingParticipant?: WaitingParticipant | null;
 };
 
 const trackingCopy: Record<ArTrackingState, string> = {
@@ -19,7 +22,7 @@ const trackingCopy: Record<ArTrackingState, string> = {
   unavailable: "Tracking unavailable",
 };
 
-export function ArDemoScreen({ onExit }: ArDemoScreenProps) {
+export function ArDemoScreen({ onExit, waitingParticipant }: ArDemoScreenProps) {
   const navigatorRef = useRef<InstanceType<typeof ViroARSceneNavigator> | null>(null);
   const [phase, setPhase] = useState<ArFlowPhase>("floor-scan");
   const [floorFound, setFloorFound] = useState(false);
@@ -36,12 +39,22 @@ export function ArDemoScreen({ onExit }: ArDemoScreenProps) {
     [],
   );
 
-  const enterBattle = () => {
+  const openOrganizerLobby = () => {
     if (!floorFound) {
       return;
     }
+    setPhase("organizer-lobby");
+  };
+
+  const enterBattle = () => {
+    if (!waitingParticipant) {
+      return;
+    }
     setPhase("battle");
-    navigatorRef.current?.arSceneNavigator?.replace({ scene: BattleScene });
+    const arNavigator = navigatorRef.current?.arSceneNavigator as unknown as
+      | { replace: (scene: { scene: ComponentType<any> }) => void }
+      | undefined;
+    arNavigator?.replace({ scene: BattleScene });
   };
 
   const useAttack = (attack: AttackId) => {
@@ -99,7 +112,9 @@ export function ArDemoScreen({ onExit }: ArDemoScreenProps) {
             </Text>
           </View>
           <View style={styles.phasePill}>
-            <Text style={styles.phaseText}>{phase === "battle" ? "00:60" : "HOST"}</Text>
+              <Text style={styles.phaseText}>
+                {phase === "battle" ? "00:60" : phase === "organizer-lobby" ? "LOBBY" : "HOST"}
+              </Text>
           </View>
         </View>
 
@@ -124,7 +139,7 @@ export function ArDemoScreen({ onExit }: ArDemoScreenProps) {
               <Pressable
                 accessibilityRole="button"
                 disabled={!floorFound}
-                onPress={enterBattle}
+                onPress={openOrganizerLobby}
                 style={({ pressed }) => [
                   styles.continueButton,
                   !floorFound && styles.continueButtonDisabled,
@@ -132,7 +147,64 @@ export function ArDemoScreen({ onExit }: ArDemoScreenProps) {
                 ]}
               >
                 <Text style={styles.continueButtonText}>
-                  {floorFound ? "Use floor and enter battle" : "Looking for floor…"}
+                  {floorFound ? "Use floor and open lobby" : "Looking for floor…"}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : phase === "organizer-lobby" ? (
+          <View style={styles.organizerLobby}>
+            <View style={styles.lobbyPanel}>
+              <View style={styles.lobbyHeadingRow}>
+                <View>
+                  <Text style={styles.panelKicker}>Organizer lobby</Text>
+                  <Text style={styles.panelTitle}>Players waiting</Text>
+                </View>
+                <View style={styles.readyCount}>
+                  <Text style={styles.readyCountText}>{waitingParticipant ? "3 / 3" : "2 / 3"}</Text>
+                </View>
+              </View>
+              <Text style={styles.panelBody}>
+                Start remains locked until every combat participant has localized and fixed a safe position.
+              </Text>
+
+              {[
+                { name: "Mira", detail: "Aegis · position locked", ready: true },
+                { name: "Theo", detail: "Rune · position locked", ready: true },
+                waitingParticipant
+                  ? {
+                      name: waitingParticipant.nickname,
+                      detail: `${getCharacter(waitingParticipant.selection.characterId).displayName} · ${getCharacterColor(waitingParticipant.selection.colorId).label}`,
+                      ready: true,
+                    }
+                  : { name: "Participant demo", detail: "Complete participant setup first", ready: false },
+              ].map((participant) => (
+                <View key={participant.name} style={styles.lobbyPlayerRow}>
+                  <View style={[styles.playerStatusDot, !participant.ready && styles.playerStatusDotPending]} />
+                  <View style={styles.lobbyPlayerCopy}>
+                    <Text style={styles.lobbyPlayerName}>{participant.name}</Text>
+                    <Text style={styles.lobbyPlayerDetail}>{participant.detail}</Text>
+                  </View>
+                  <Text style={[styles.lobbyPlayerState, !participant.ready && styles.lobbyPlayerStatePending]}>
+                    {participant.ready ? "WAITING" : "NOT READY"}
+                  </Text>
+                </View>
+              ))}
+
+              <Pressable
+                accessibilityHint={waitingParticipant ? "Starts the battle for all waiting players" : "Participant setup is incomplete"}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: !waitingParticipant }}
+                disabled={!waitingParticipant}
+                onPress={enterBattle}
+                style={({ pressed }) => [
+                  styles.continueButton,
+                  !waitingParticipant && styles.continueButtonDisabled,
+                  pressed && waitingParticipant && styles.controlPressed,
+                ]}
+              >
+                <Text style={styles.continueButtonText}>
+                  {waitingParticipant ? "Start battle" : "Waiting for participant"}
                 </Text>
               </Pressable>
             </View>
@@ -255,6 +327,19 @@ const styles = StyleSheet.create({
   continueButtonDisabled: { backgroundColor: colors.surfaceStrong },
   continueButtonText: { color: colors.accentInk, fontSize: 16, fontWeight: "800" },
   battleContent: { flex: 1, justifyContent: "flex-end" },
+  organizerLobby: { flex: 1, justifyContent: "flex-end", padding: 14 },
+  lobbyPanel: { backgroundColor: colors.cameraScrim, borderRadius: 16, padding: 17 },
+  lobbyHeadingRow: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
+  readyCount: { alignItems: "center", backgroundColor: colors.surfaceStrong, borderRadius: 999, justifyContent: "center", minHeight: 40, minWidth: 64, paddingHorizontal: 12 },
+  readyCountText: { color: colors.ink, fontSize: 13, fontWeight: "900" },
+  lobbyPlayerRow: { alignItems: "center", borderBottomColor: colors.outline, borderBottomWidth: 1, flexDirection: "row", minHeight: 62 },
+  playerStatusDot: { backgroundColor: colors.success, borderRadius: 6, height: 12, width: 12 },
+  playerStatusDotPending: { backgroundColor: colors.accent },
+  lobbyPlayerCopy: { flex: 1, marginLeft: 11 },
+  lobbyPlayerName: { color: colors.ink, fontSize: 14, fontWeight: "800" },
+  lobbyPlayerDetail: { color: colors.inkSubtle, fontSize: 11, marginTop: 3 },
+  lobbyPlayerState: { color: colors.success, fontSize: 10, fontWeight: "900", letterSpacing: 0.6 },
+  lobbyPlayerStatePending: { color: colors.accent },
   crosshair: { alignSelf: "center", height: 54, position: "absolute", top: "43%", width: 54 },
   crosshairHorizontal: { backgroundColor: colors.ink, height: 2, left: 0, position: "absolute", right: 0, top: 26 },
   crosshairVertical: { backgroundColor: colors.ink, bottom: 0, left: 26, position: "absolute", top: 0, width: 2 },

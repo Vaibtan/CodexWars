@@ -23,7 +23,7 @@
 
 ### 1. Android and iOS AR with Expo/Viro — feasible, with a device gate
 
-ReactVision's official Expo guide states that ViroReact does **not** run in Expo Go and requires a development client or prebuild plus a rebuild after adding the config plugin. It supports Android `AR` mode (ARCore), iOS permission configuration, and documents support through Expo SDK 57 / React Native 0.86. Therefore the specified Expo SDK 56 development-build approach is technically compatible. [Viro Expo integration guide](https://viro-community.readme.io/docs/integrating-with-expo)
+ReactVision's official Expo guide states that ViroReact does **not** run in Expo Go and requires a development client or prebuild plus a rebuild after adding the config plugin. It supports Android `AR` mode (ARCore) and iOS permission configuration. CodexWars pins ViroReact 2.53.1 for its Expo SDK 54 / React Native 0.81 compatibility. [Viro Expo integration guide](https://viro-community.readme.io/docs/integrating-with-expo)
 
 For Windows development, EAS performs builds on Expo servers and can create iOS builds from non-macOS hosts. A physical iPhone device build still requires paid Apple Developer signing; an iOS Simulator is macOS-only and cannot substitute for this AR test. [Expo development-build documentation](https://docs.expo.dev/develop/development-builds/create-a-build/)
 

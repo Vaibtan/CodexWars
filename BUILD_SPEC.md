@@ -218,25 +218,27 @@ export const AIM = {
 
 ### 7.2 Protocol (all messages typed in one file)
 
+Room admission happens before a WebSocket room connection exists. `POST /v1/rooms` creates and reserves the organizer seat; `POST /v1/rooms/{code}/reservations` resolves the four-digit code and reserves a participant seat. Both return a Colyseus 0.17 reservation consumed by `@colyseus/sdk`. The exact HTTP, state, command, event, auth, error, and idempotency contracts are locked in `docs/API_AND_REALTIME_SPEC.md`.
+
 | Direction | Message | Payload |
 |---|---|---|
-| C→S | `create_room` | `{ organizerName }` |
-| C→S | `join_room` | `{ code, displayName }` |
-| Organizer→S | `set_combat_included` | `{ playerId, included }` — quiz-only players remain in the room but are excluded from battle readiness |
-| Organizer→S | `configure_arena` | `{ radiusM }` |
-| Organizer→S | `select_quiz_template` | `{ templateId: "programming-fundamentals-v1", sessionName?: string }` |
-| Organizer→S | `start_quiz` | `{}` — freezes the participant cohort and starts the server clock |
-| C→S | `quiz_answer` | `{ questionId, optionId }` — exactly one answer before the authoritative deadline |
-| C→S | `localization_changed` | `{ state: "searching" \| "localized" \| "lost" }` |
-| C→S | `lock_position` | `{ x, z }` (marker-relative metres) |
-| C→S | `unlock_position` | `{}` |
-| C→S | `ready_changed` | `{ ready }` |
-| Organizer→S | `start_battle` | `{}` |
-| C→S | `attack` | `{ weapon, dirX, dirZ, predictedTargetId? }` — resolved at server receipt; predicted target is **diagnostics only**, never trusted |
-| S→C | `attack_resolved` | `{ attackerId, targetId \| null, damage, targetShield, targetHp }` |
-| S→C | `player_eliminated` | `{ playerId }` |
-| S→C | `battle_completed` | `{ winnerId, standings }` |
-| S→C | `error` | `{ code, message }` (typed error codes, e.g. `POSITION_OUT_OF_BOUNDS`, `SPACING_VIOLATION`, `ROOM_FULL`) |
+| Organizer→S | `set_combat_included` | `{ requestId, playerId, included }` — quiz-only players remain in the room but are excluded from battle readiness |
+| Organizer→S | `configure_arena` | `{ requestId, radiusM }` |
+| Organizer→S | `select_quiz_template` | `{ requestId, templateId: "programming-fundamentals-v1", sessionName?: string }` |
+| Organizer→S | `start_quiz` | `{ requestId }` — freezes the participant cohort and starts the server clock |
+| C→S | `quiz_answer` | `{ requestId, questionId, optionId }` — exactly one answer before the authoritative deadline |
+| C→S | `select_character` | `{ requestId, characterId, colorId }` — validated catalog cosmetics only; never changes gameplay stats |
+| C→S | `localization_changed` | `{ requestId, state: "searching" \| "localized" \| "lost" }` |
+| C→S | `lock_position` | `{ requestId, x, z }` (marker-relative metres) |
+| C→S | `unlock_position` | `{ requestId }` |
+| C→S | `ready_changed` | `{ requestId, ready }` |
+| Organizer→S | `start_battle` | `{ requestId }` |
+| C→S | `attack` | `{ requestId, weaponId, dirX, dirZ, predictedTargetId? }` — resolved at server receipt; predicted target is **diagnostics only**, never trusted |
+| S→C | `quiz_answer_accepted` / `quiz_answer_result` | Direct acknowledgement, then private correctness only after reveal |
+| S→C | `attack_resolved` | `{ requestId, revision, attackerId, targetId \| null, damage, targetShield, targetHp }` |
+| S→C | `player_eliminated` | `{ revision, playerId }` |
+| S→C | `battle_completed` | `{ revision, winnerId, reason, standings }` |
+| S→C | `error` | `{ requestId?, code, message, retryable, details? }` |
 
 Continuous state (player list, combat inclusion, phases, HP, positions, `startsAt`, `serverNow`, and public quiz state) flows through Colyseus **state sync**, not messages; messages are for discrete commands/events only. Clients calculate a server-time offset from the latest `serverNow` before rendering the countdown and quiz timers. This keeps LAN traffic tiny (PRD §9 reliability).
 
@@ -249,7 +251,7 @@ Continuous state (player list, combat inclusion, phases, HP, positions, `startsA
 
 ### 8.1 Room lifecycle
 - One Colyseus room class `WarRoom` per battle session; a `codes.ts` registry maps 4-digit codes → roomId (allocate from shuffled pool, never reuse while active, expire with the room after two hours of inactivity).
-- First client (`create_room`) becomes organizer; an organizer disconnect pauses progression for 60 seconds rather than destroying the room.
+- The authenticated `POST /v1/rooms` admission path creates the organizer seat; a participant payload can never self-assign that role. An organizer disconnect pauses progression for 60 seconds rather than destroying the room.
 - **Reconnection:** use Colyseus 0.17 `onDrop`/`onReconnect` — a dropped participant keeps their `PlayerState` for `DISCONNECT_ELIMINATION_MS` during battle (then auto-eliminated) and indefinitely pre-battle (organizer can remove).
 
 ### 8.2 Phase machine
@@ -260,7 +262,7 @@ Same machine as v1 (§18 of the draft). Every message handler first checks phase
 ### 8.3 Combat resolution
 The ray-vs-circle nearest-target algorithm and shield-before-HP damage order from the v1 draft (§15) carry over **verbatim** — they live in `packages/shared/src/combat.ts` as pure functions; `WarRoom` just calls them. Server-side validation before resolution: attacker alive, phase is battle, `now ≥ startsAt`, cooldown elapsed (`nextAttackAt`), charges available, direction vector normalizable. P0 resolves attacks at server receipt; it has no client-clock lag compensation.
 
-Match end: last-alive, or timer (server `setTimeout` anchored to `startsAt + DURATION_MS`) → highest HP → quiz score tiebreak. Results broadcast once; organizer can `reset` back to lobby retaining players for round two.
+Match end: last-alive, or timer (server `setTimeout` anchored to `startsAt + DURATION_MS`) → highest HP → quiz score tiebreak → stable `playerId` ordering for an otherwise exact tie. Results broadcast once; organizer can `reset` back to lobby retaining players for round two.
 
 ### 8.4 What the server never does
 No AR concepts, no camera data, no trust in client-computed hits, and no direct mobile Firestore writes. It persists only quiz templates, submissions, and results through Firebase Admin; room phase, countdown, combat, and winner authority remain in Colyseus memory.
