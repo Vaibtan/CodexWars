@@ -15,8 +15,8 @@ Reliability is the top-priority requirement for this build. Every choice below f
 2. **Prefer boring and proven over newest.** Expo SDK 56 over the days-old SDK 57; mature APIs over previews.
 3. **The server never knows AR exists.** It consumes 2D coordinates and directions. This makes the entire combat/multiplayer layer testable in plain Node with zero devices, and keeps the AR layer swappable (up to and including a Unity rewrite) without touching game logic.
 4. **The AR layer sits behind one interface.** All Viro usage is confined to one module exposing a small contract (localization state, camera pose in arena coordinates). Nothing else imports Viro.
-5. **No internet dependency at demo time.** Marker colocation needs no cloud service, so the whole game runs on a laptop server + phone hotspot LAN. The demo cannot be killed by venue WiFi or a cloud outage.
-6. **Risk retires in order.** M0 proves marker colocation on both Android and iOS before any feature code exists. Each milestone has explicit exit criteria.
+5. **Keep live gameplay local; isolate the one cloud dependency.** Marker colocation, Colyseus room state, and combat run on a laptop server + phone hotspot LAN. Firestore is required only for quiz templates, submissions, and final results, through the server Admin SDK; a loss of internet must be surfaced before quiz start and never changes a resolved combat action.
+6. **Risk retires in order.** M0 proves marker colocation on both Android and iOS before AR, multiplayer, or quiz-flow feature work begins. Credential/bootstrap scaffolding may be prepared first; each milestone still has explicit exit criteria.
 7. **Pure functions for everything with math in it.** Hit detection, coordinate conversion, validation, reward mapping — all side-effect-free, all unit-tested before device testing.
 8. **Verify API shapes against current docs at implementation time** (use the docs-lookup tooling, e.g. ctx7/find-docs, for Viro and Colyseus specifics) — both libraries changed significantly in 2025–26 and training-data memory of their APIs is unreliable.
 
@@ -263,7 +263,7 @@ The ray-vs-circle nearest-target algorithm and shield-before-HP damage order fro
 Match end: last-alive, or timer (server `setTimeout` anchored to `startsAt + DURATION_MS`) → highest HP → quiz score tiebreak. Results broadcast once; organizer can `reset` back to lobby retaining players for round two.
 
 ### 8.4 What the server never does
-No AR concepts, no camera data, no trust in client-computed hits, no persistence (in-memory only through M2).
+No AR concepts, no camera data, no trust in client-computed hits, and no direct mobile Firestore writes. It persists only quiz templates, submissions, and results through Firebase Admin; room phase, countdown, combat, and winner authority remain in Colyseus memory.
 
 ---
 
@@ -323,7 +323,7 @@ CI (GitHub Actions): typecheck + unit + integration on every push. Device tests 
 
 ## 11. Demo/ops configuration
 
-- **Demo topology:** Colyseus on the Windows laptop; laptop + all phones on one phone-hotspot (or the laptop's own hotspot). Zero internet dependency (§1.5). Firewall rule pre-added; server URL entered once per phone and persisted.
+- **Demo topology:** Colyseus on the Windows laptop; laptop + all phones on one phone-hotspot (or the laptop's own hotspot). The laptop needs outbound internet during the quiz for Firestore; AR and combat traffic remain on LAN. Firewall rule pre-added; server URL entered once per phone and persisted.
 - **Config:** `.env` on the server (port), in-app server-URL field on mobile (persisted with `AsyncStorage`).
 - **Post-M2 hosting:** any small VPS or Render/Railway node instance running the same server; only the URL changes. Decide at M3 — not a current concern.
 - **Demo kit checklist:** 2 printed markers (primary + spare), tape, charged phones + power bank, laptop, pre-tested hotspot, rehearsed 5-minute script, and a recorded backup video of a successful run.

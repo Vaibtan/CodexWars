@@ -8,6 +8,8 @@ apps/mobile/android/
 .env.*
 !.env.example
 .firebase/
+*service-account*.json
+*firebase-admin*.json
 firebase-debug.log
 firestore-debug.log
 ui-debug.log

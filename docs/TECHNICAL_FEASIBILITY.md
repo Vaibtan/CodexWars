@@ -15,9 +15,9 @@
 | Multiplayer backend | **Node.js 22 LTS + TypeScript + Colyseus 0.17.x**; one authoritative `WarRoom`; shared pure TypeScript combat package | Colyseus rooms provide state synchronization and WebSocket transport; the server can retain the authoritative 2D state and resolve discrete attacks. |
 | Mobile multiplayer client | **`@colyseus/sdk` 0.17.43**, paired with **`colyseus` 0.17.10** server | Current Colyseus 0.17 documentation uses this SDK and its automatic reconnection lifecycle. Verify this exact pinned pair in the first networking spike. |
 | Multiplayer synchronization | Colyseus schema state at **10 Hz / 100 ms** for lobby, player state, HP, and phase; immediate `attack_resolved` events for combat results; discrete attack commands only | No pose stream is needed. The client keeps aim local and sends a normalized direction only when firing; the server validates cooldown/phase/aliveness and ray-vs-circle hit testing. |
-| P0 data store | **None.** Room/player state remains in the single Colyseus process's memory and expires after two idle hours. | This is the stated privacy-minimal P0 requirement. A database would increase scope without supporting the vertical-slice flow. |
-| P0 runtime / cloud | **No runtime cloud.** Run Node/Colyseus on the demo laptop, with all phones on the same non-isolated hotspot/LAN. EAS Build is used only to build iOS development/TestFlight binaries. | Keeps the demo independent of venue internet and follows the architecture's local-first topology. |
-| Post-P0 persistence | When match history/organizer accounts begin, add **PostgreSQL** (managed or self-hosted) for durable domain data; keep live room state in Colyseus. Add Redis Presence/Driver only when horizontally scaling Colyseus. | Separates transactional/history data from ephemeral, low-latency room state. Neither is a P0 dependency. |
+| P0 quiz data store | **Cloud Firestore**, accessed only by Firebase Admin on the Colyseus server | Stores quiz templates, answer submissions, and final results. Live room state, timers, scoring, rewards, and combat remain in Colyseus memory. |
+| P0 runtime / cloud | Laptop-hosted Node/Colyseus over hotspot LAN **plus outbound internet from the laptop during quiz phases** for Firestore. EAS Build is used only to build iOS development/TestFlight binaries. | Keeps latency-sensitive AR/combat local while isolating cloud use to durable quiz data. |
+| Post-P0 persistence | Keep Firestore for quiz content/results unless product reporting needs relational analytics; add PostgreSQL then for broader organizer/product data. Add Redis Presence/Driver only when horizontally scaling Colyseus. | Separates durable quiz data from ephemeral, low-latency room state. |
 
 ## Evidence and feasibility assessment
 
@@ -52,9 +52,9 @@ For mobile drops, Colyseus 0.17 provides `onDrop`, `allowReconnection`, `onRecon
 
 The LAN design is sound for P0, but it is an operational risk, not a networking feature supplied by Colyseus: devices must use the laptop's **private LAN IP** (not `localhost`), join the same non-client-isolated hotspot, and be allowed through the laptop firewall on the Node port. Rehearse this on both platforms. Colyseus's production guidance confirms ordinary Node deployment with WebSocket Upgrade handling; it does not remove LAN/firewall setup work. [Colyseus deployment guide](https://docs.colyseus.io/deployment)
 
-### 4. Database and cloud — deliberately omitted from P0
+### 4. Firestore quiz data and cloud boundary
 
-The approved specifications require nickname-only, in-memory rooms and deletion on expiry. That is compatible with a single Node process and avoids storing student data. Do not use Firebase/Firestore, Supabase, or a managed database for the P0 battle flow.
+Firestore is required for P0 quiz templates, submissions, and final results. It is not part of battle state: nickname/room/combat state remains in-memory and expires with the room. The Firebase Admin SDK is the sole Firestore writer; the mobile Firebase SDK authenticates anonymously and may read only its own completed result.
 
 For a later hosted product, use a single VPS/PaaS Node service behind TLS/WebSocket-aware Nginx or the provider's equivalent. When horizontally scaling room processes, Colyseus requires a shared Presence and Driver; its official scalability guide shows Redis for those roles. Add PostgreSQL only for product data such as organizers, authored quizzes, session history, and consent/retention records—not for 60-second in-progress combat. [Colyseus scalability guide](https://docs.colyseus.io/scalability)
 

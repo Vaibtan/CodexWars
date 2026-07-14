@@ -1,7 +1,7 @@
 # CodexWars — Architecture Design
 
 **Version:** 1.0
-**Companions:** `PRD.md` v2 (what & why) · `BUILD_SPEC.md` v1 (stack, repo layout, build order)
+**Companions:** `PRD.md` v2.2 (what & why) · `BUILD_SPEC.md` v1.2 (stack, repo layout, build order)
 **This document:** the structural and runtime design — components, deployment, critical sequences, state machines, and invariants. Diagrams here are the reference during implementation; if code and this doc disagree, fix one of them in the same commit.
 
 ---
@@ -13,8 +13,8 @@ Three layers, one hard rule per boundary:
 | Layer | Owns | Hard rule |
 |---|---|---|
 | **AR presentation** (`mobile/src/ar/`) | Marker tracking, coordinate conversion, rendering bundled GLBs/effects in camera space | Only place Viro is imported. Publishes plain 2D data; never touches the network. |
-| **Game client** (`mobile/src/{screens,store,net}`) | UI, local state, Colyseus connection | Never imports Viro types. Treats AR as a sensor behind the `ArSessionState`/`ArPose` contract. |
-| **Authoritative server** (`server/`) | Rooms, phase machine, validation, combat, results | Never knows AR exists. Consumes marker-relative 2D coordinates as opaque numbers. |
+| **Game client** (`mobile/src/{screens,store,net,lib/firebase}`) | UI, local state, Colyseus connection, anonymous Firebase identity | Never imports Viro types or Admin credentials. Treats AR as a sensor behind the `ArSessionState`/`ArPose` contract. |
+| **Authoritative server** (`server/`) | Rooms, phase machine, validation, combat, results, Firestore quiz persistence | Never knows AR exists. Consumes marker-relative 2D coordinates as opaque numbers. |
 
 All three compile against `packages/shared` (types, protocol, constants, pure game math). The math is written once and executed in two places: the server uses it authoritatively; the client uses the same functions for prediction (crosshair target highlight), which is why predicted and actual results almost always agree.
 
@@ -26,24 +26,26 @@ All three compile against `packages/shared` (types, protocol, constants, pure ga
 
 ```mermaid
 flowchart TB
-    subgraph HOTSPOT["Phone hotspot or laptop hotspot (LAN, no internet needed)"]
+    subgraph HOTSPOT["Phone hotspot or laptop hotspot (LAN)"]
         subgraph LAPTOP["Windows laptop"]
-            SRV["Colyseus server (Node 22)<br/>in-memory state only"]
+            SRV["Colyseus server (Node 22)<br/>live state + Firebase Admin"]
         end
         P1["Organizer phone<br/>(Android or iOS dev build)"]
         P2["Participant phone 1<br/>(Android or iOS)"]
         P3["Participant phone 2..12<br/>(mixed platform)"]
     end
+    FIRESTORE["Cloud Firestore<br/>templates · submissions · results"]
     MARKER["Printed A4 marker on floor<br/>(shared coordinate origin — passive, no electronics)"]
     P1 <-->|WebSocket| SRV
     P2 <-->|WebSocket| SRV
     P3 <-->|WebSocket| SRV
+    SRV <-->|Admin SDK / HTTPS| FIRESTORE
     P1 -.camera.-> MARKER
     P2 -.camera.-> MARKER
     P3 -.camera.-> MARKER
 ```
 
-Properties: no cloud services, no internet, one Wi-Fi hop between every phone and the server. The marker is the only "shared infrastructure" and it's a piece of paper.
+Properties: one Wi-Fi hop between every phone and the server. Firestore is the only cloud dependency and stores quiz data only; the marker remains the shared spatial infrastructure and is a piece of paper.
 
 ### Product topology (M3+)
 Identical, except the Colyseus server moves to a small VPS/PaaS node and phones reach it over the internet. Nothing in the code changes but the URL — this is deliberate (BUILD_SPEC §11).

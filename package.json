@@ -13,6 +13,7 @@
   "scripts": {
     "mobile": "npm run start --workspace @codexwars/mobile",
     "server": "npm run dev --workspace @codexwars/server",
+    "seed:quiz": "npm run seed:quiz --workspace @codexwars/server",
     "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present"
   }

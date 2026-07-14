@@ -1,8 +1,14 @@
 import { createServer } from "node:http";
 
-// Persistence remains optional: the first local server runs on a LAN without
-// Firebase. Firebase helpers stay available for later room persistence work.
-export { getFirebaseApp, getFirestoreDb } from "./firebase.js";
+// Firestore durably stores quiz templates, submissions, and final results.
+// Colyseus remains the authority for the room clock, scoring, and combat.
+export {
+  getFirebaseApp,
+  getFirebaseAuth,
+  getFirestoreDb,
+  verifyFirebaseIdToken,
+} from "./firebase.js";
+export { FirestoreQuizRepository } from "./quiz/firestoreQuizRepository.js";
 
 const port = Number.parseInt(process.env.PORT ?? "4000", 10);
 

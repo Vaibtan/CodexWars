@@ -1,6 +1,6 @@
 # CodexWars — P0 Implementation Plan
 
-**Status:** Execution plan — Firebase Admin scaffold exists; P0 feature implementation has not started
+**Status:** Execution plan — Firebase Admin, mobile Firebase client, and Firestore quiz repository scaffolds exist; full quiz flow has not started
 **Last updated:** 2026-07-14  
 **Sources of truth:** [`PRD.md`](../PRD.md), [`BUILD_SPEC.md`](../BUILD_SPEC.md), [`ARCHITECTURE.md`](../ARCHITECTURE.md), and [`AR_IMPLEMENTATION_SPEC.md`](AR_IMPLEMENTATION_SPEC.md)
 
@@ -12,7 +12,7 @@ This plan preserves the current product architecture while incorporating the req
 
 1. **P0 is mixed-platform.** Every device milestone requires one physical ARCore Android phone and one physical ARKit iPhone. Android builds locally; iOS development and rehearsal builds use EAS/TestFlight.
 2. **Live authority stays in Colyseus.** The `WarRoom` is the sole writer for room phase, quiz clock, answers/scores, rewards, positions, HP, eliminations, and winner.
-3. **Firebase is deferred outside P0/M2.** P0 and M2 are LAN-only and in-memory, with no Firebase JS initialization, Firestore reads/writes, or runtime internet requirement. The existing Firebase Admin scaffold is intentionally unused until a P2 persistence and privacy decision.
+3. **Firestore persists quiz data in P0.** Firebase Admin is the only writer of templates, answer submissions, and completed results; the mobile Firebase SDK signs in anonymously and may read only its own result. Colyseus remains the sole authority for the quiz clock, scoring, rewards, room phase, and combat. The quiz requires the laptop server to have outbound internet; AR and combat remain LAN-local.
 4. **“Organizer creates a quiz” means creates a quiz session from the bundled ten-question Programming Fundamentals quiz.** The organizer may name the session and start it, but arbitrary question authoring remains P2 per the PRD. This avoids accidentally adding accounts, permissions, and a content-management system to P0.
 5. **The P0 quiz is locked.** `programming-fundamentals-v1` has ten questions: seven 30-second basic/intermediate questions, three 45-second difficult questions, and a five-second automatic reveal. Shield rewards are 0/10/20/30/40 for score bands 0–2/3–4/5–6/7–8/9–10.
 6. **P0 AR renders one bundled default GLB avatar.** M0 uses only diagnostic primitives; after M0 go/conditional-go, P0 renders the default GLB. P1 adds three selectable bundled GLB cosmetics and palette choice. GLBs never define hitboxes or combat logic.
@@ -28,7 +28,7 @@ flowchart TD
     B["1. Expo Hello World<br/>Android and iOS native dev builds"]
     C["M0 AR spike<br/>Android-to-iPhone marker measurements"]
     D["2. Shared + Colyseus foundation<br/>room code, join, state sync, reconnect"]
-    E["3A. Quiz track<br/>10-question server clock, scoring, rewards"]
+    E["3A. Firestore quiz track<br/>templates, submissions, results"]
     F["3B. Mobile lobby track<br/>join/create, organizer controls, quiz UI"]
     G["4. Quiz-to-localization integration<br/>combat inclusion and start invariant"]
     H["5. AR positioning + default GLB<br/>marker pose, lock X/Z, minimap"]
@@ -43,7 +43,7 @@ flowchart TD
     G --> H --> I --> J
 ```
 
-`E` is a hard gate: if M0 is a no-go, stop AR P0 and obtain an explicit revised-product decision. Do not build rich AR gameplay around an unproven coordinate system.
+`C` is a hard gate: if M0 is a no-go, stop AR P0 and obtain an explicit revised-product decision. Do not build rich AR gameplay around an unproven coordinate system.
 
 ## 3. Target repository structure
 
@@ -56,13 +56,15 @@ apps/
       components/                 # plain RN UI; no Viro imports
       ar/                         # the only Viro importer
       net/                        # @colyseus/sdk client wrapper
+      lib/firebase/               # public client config, anonymous identity, own-result read
       store/                      # sessionStore and battleStore
   server/                         # Node/TypeScript Colyseus server
     src/
       rooms/WarRoom.ts
       schema/                     # Colyseus state definitions
       quiz/                       # bundled question bank, scoring, session clock
-      firebase.ts                 # deferred P2 scaffold; not imported by P0/M2 runtime
+      firebase.ts                 # Admin SDK + verified Firebase identities
+      quiz/firestoreQuizRepository.ts # server-only template, submission, result persistence
 packages/
   shared/
     src/
@@ -86,7 +88,7 @@ Record these decisions in `PRD.md` and `BUILD_SPEC.md`:
 
 - P0 quiz is a **bundled ten-question Programming Fundamentals session** created and started by the organizer.
 - Standard questions use a 30-second server clock; difficult questions use 45 seconds.
-- Firebase is deferred outside P0/M2; P0 live play is LAN-only and in-memory.
+- Firestore persists quiz templates, submissions, and results in P0; it never owns a timer, score, reward, room phase, or combat action.
 - Mobile networking uses `@colyseus/sdk` 0.17.43 with Colyseus server 0.17.10; the first networking spike verifies the exact pinned pair.
 
 ### 4.2 Accounts, devices, and configuration
@@ -94,7 +96,7 @@ Record these decisions in `PRD.md` and `BUILD_SPEC.md`:
 - Obtain an ARCore-certified Android test phone and a designated ARKit-compatible iPhone.
 - Configure the Expo account, EAS project, Apple Developer signing, iPhone registration, and internal TestFlight access.
 - Prepare a non-isolated hotspot and record the Windows laptop’s private LAN IP.
-- Add `.env.example` entries for the local server URL only. No secrets enter source control.
+- Configure `FIREBASE_PROJECT_ID` and local Application Default Credentials for the server; create `apps/mobile/.env` from its checked-in example using only public Web Firebase configuration. No service-account JSON enters source control or the mobile app.
 - Set up CI for typecheck, unit tests, and server integration tests. Device testing remains a dated manual checklist.
 
 **Exit:** both native development builds can display the same static app screen on their physical devices.
@@ -122,7 +124,7 @@ This is intentionally the first implementation task.
 
 ## 6. Phase 2 — shared contract and multiplayer foundation
 
-Firebase is intentionally absent from this phase. The existing Admin bootstrap remains an unimported P2 candidate; it must not be added to the P0 mobile bundle, server startup path, or environment configuration.
+Firebase is limited to quiz persistence in this phase. `apps/server/src/firebase.ts` is the trusted Admin boundary; `apps/mobile/src/lib/firebase/` contains only the Firebase JavaScript SDK and anonymous identity. The client never receives answer keys or writes templates, submissions, or results.
 
 ### 6.1 Shared game contract
 
@@ -148,7 +150,8 @@ Implement `WarRoom` and a mobile `warRoomClient` wrapper using the pinned `@coly
 
 - An Android and iPhone can join the same laptop-hosted room over the hotspot.
 - Both render the same roster/phase and reconnect to the same player record.
-- The app and server start with no Firebase configuration, internet access, or Firebase imports on the P0 runtime path.
+- The app signs in anonymously when public Firebase configuration is present; the server verifies the ID token before binding its UID to a room player.
+- The server loads the ten-question template from Firestore and writes submitted answers/results through Admin. A Firestore failure is visible and blocks quiz start; it never changes an already-resolved combat action.
 
 ## 7. Phase 3 — hosted ten-question Programming Fundamentals quiz
 
@@ -157,7 +160,7 @@ This work starts only after the M0 go/conditional-go decision and multiplayer co
 ### 7.1 Quiz session behavior
 
 1. Organizer creates a room and selects **Programming Fundamentals — 10 questions**.
-2. This creates an in-memory `QuizSession` from the bundled template.
+2. The server loads the full bundled template from Firestore, creates a Firestore `QuizSession`, and reads/writes quiz data only through `FirestoreQuizRepository`.
 3. Organizer presses **Start Quiz**. The server freezes the participant cohort and sets `phase = quiz`.
 4. The server broadcasts only one public question at a time and authoritative `questionEndsAt`.
 5. Each participant may submit exactly one selected option before the deadline. Late, duplicate, malformed, or wrong-phase submissions receive a typed error and do not change score.
@@ -211,8 +214,9 @@ Every player starts with 100 HP. Shield is additive protection, not additional H
 
 ### 7.5 Quiz modules and tests
 
-- `shared/quiz.ts`: immutable template types, public question projection, score/reward calculation.
-- `server/quiz/session.ts`: deadlines, answer recording, reveal transition, completion.
+- `shared/quiz.ts`: immutable public question types, public projection, score/reward calculation.
+- `server/quiz/session.ts`: deadlines, answer recording, reveal transition, completion; it calls the Admin repository as a durable side effect after validation.
+- `server/quiz/firestoreQuizRepository.ts`: template loading, one submission per player/question, and final result writes. It is the only quiz persistence implementation.
 - `mobile/screens/QuizScreen.tsx`: question, server-clock timer, option selection, submitted state, reveal state.
 - Unit tests: no correct answer leaks, deadline boundary, duplicate submission, reward bands, disconnect/missing answer, and question-order determinism.
 - Integration tests: organizer start, every participant answer path, expiry scoring, client reconnection, completion-to-localization transition.
@@ -302,7 +306,7 @@ One Android and one iPhone can localize, lock distinct valid positions, see each
 | Server / shared game core | M0 conditional/go | schemas, room lifecycle, quiz, combat, tests | Viro imports or UI decisions |
 | Quiz | Colyseus contract | template, clock, scoring, rewards, quiz screens | AR coordinate math |
 | AR presentation | M0 conditional/go + position state | Viro scene, default GLB, effects, HUD feed | HP, hit, winner authority |
-| Firebase (P2 candidate) | explicit product/privacy decision | optional persistence evaluation | P0/M2 runtime, live room state, or participant data writes |
+| Firestore quiz persistence | Firebase project + authenticated server | server-only templates, submissions, results | quiz clock, score/reward authority, room state, combat state, or direct participant writes |
 
 ## 12. Definition of done for P0
 
@@ -311,7 +315,7 @@ P0 is done only when all of the following are true:
 1. The same installed build flow works on a physical Android phone and iPhone; the iOS rehearsal build is available through TestFlight.
 2. The M0 evidence document records a cross-platform go/conditional-go decision.
 3. Organizer can create and start the bundled ten-question Programming Fundamentals session; participants join, answer on server clocks, and receive deterministic shield rewards.
-4. P0/M2 runs with no Firebase configuration or runtime dependency.
+4. The server loads the fixed quiz template and persists submissions/results through Firestore Admin; the mobile app has no Admin credential and cannot read answer keys or write quiz data directly.
 5. All combat-included players localize, lock valid positions, and appear on the organizer minimap as bundled default GLB avatars.
 6. A basic-bolt attack produces the same authoritative 2D damage state on all phones regardless of GLB mesh, bone, height, or vertical camera pitch; elimination and winner results are consistent.
 7. The full mixed-platform demo runs successfully twice in a row with no continuous AR camera session over three minutes.
