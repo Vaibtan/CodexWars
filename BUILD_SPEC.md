@@ -1,8 +1,8 @@
 # CodexWars — Build Specification
 
-**Version:** 1.0
+**Version:** 1.1
 **Companion to:** `PRD.md` v2 (product requirements; decision log in §2 there)
-**Scope:** M0 (colocation spike) through M2 (hardened P1). M3+ sketched only.
+**Scope:** M0 (cross-platform colocation spike) through M2 (hardened P1). Product work is sketched only.
 **Last updated:** 2026-07-14 — all package versions below verified against the npm registry on this date.
 
 ---
@@ -16,7 +16,7 @@ Reliability is the top-priority requirement for this build. Every choice below f
 3. **The server never knows AR exists.** It consumes 2D coordinates and directions. This makes the entire combat/multiplayer layer testable in plain Node with zero devices, and keeps the AR layer swappable (up to and including a Unity rewrite) without touching game logic.
 4. **The AR layer sits behind one interface.** All Viro usage is confined to one module exposing a small contract (localization state, camera pose in arena coordinates). Nothing else imports Viro.
 5. **No internet dependency at demo time.** Marker colocation needs no cloud service, so the whole game runs on a laptop server + phone hotspot LAN. The demo cannot be killed by venue WiFi or a cloud outage.
-6. **Risk retires in order.** M0 proves the one unproven assumption (marker colocation quality) before any feature code exists. Each milestone has explicit exit criteria.
+6. **Risk retires in order.** M0 proves marker colocation on both Android and iOS before any feature code exists. Each milestone has explicit exit criteria.
 7. **Pure functions for everything with math in it.** Hit detection, coordinate conversion, validation, reward mapping — all side-effect-free, all unit-tested before device testing.
 8. **Verify API shapes against current docs at implementation time** (use the docs-lookup tooling, e.g. ctx7/find-docs, for Viro and Colyseus specifics) — both libraries changed significantly in 2025–26 and training-data memory of their APIs is unreliable.
 
@@ -89,21 +89,22 @@ Root scripts: `npm run server` (ts-node/tsx dev server), `npm run mobile` (expo 
 
 ---
 
-## 4. Development environment (Windows + physical Android)
+## 4. Development environment (Windows + physical Android and iPhone)
 
 One-time setup, in order:
 
 1. **Node 22 LTS** (nvm-windows), `corepack` off, npm only — no yarn/pnpm mixing.
 2. **JDK 17** + **Android Studio** (SDK Platform for API 35, platform-tools). Set `ANDROID_HOME`, add `platform-tools` to PATH.
 3. **Physical ARCore-capable Android phone**, developer mode + USB debugging on. Verify with `adb devices`. (Emulators cannot do ARCore camera tracking — all AR work is on-device.)
-4. **Expo account** + `eas-cli` (needed later for iOS cloud builds; harmless to set up now).
-5. Scaffold: `npx create-expo-app@latest` pinned to SDK 56 template → move into `apps/mobile` → add Viro + its config plugin to `app.json` → `npx expo prebuild --platform android` → `npx expo run:android` with the phone attached. **First green build on the device is the exit of environment setup** — nothing else starts until this works.
+4. **Physical ARKit-compatible iPhone**, a paid Apple Developer account, a registered test device, and App Store Connect/TestFlight access. Enable iOS Developer Mode where required. EAS Build can create signed iPhone development builds from Windows, but iOS device testing still needs the physical phone.
+5. **Expo account** + `eas-cli`; configure `eas.json` with a development profile and managed signing credentials.
+6. Scaffold: `npx create-expo-app@latest` pinned to SDK 56 template → move into `apps/mobile` → add Viro + its config plugin to `app.json`. Produce the Android dev build locally and the iOS development build through EAS; prepare an internal TestFlight profile for the final rehearsal binary. **First green builds installed on both physical devices are the exit of environment setup** — nothing else starts until this works.
 
 Local dev networking: server on the Windows machine, phone on the same LAN/hotspot; the app takes a server URL (settings screen or `.env`) — no hardcoded IPs.
 
 Recurring gotchas to expect (documented here so they don't burn hours):
 - Viro requires the dev-client build; if the app opens in Expo Go, the AR scene will crash — always launch via the installed dev build.
-- After any change to `app.json` plugins or native deps: re-run `expo prebuild` + `expo run:android`.
+- After any change to `app.json` plugins or native deps: rebuild Android locally and queue a new signed iOS EAS development build; test both before merging.
 - Windows Defender/Firewall will prompt for the Node server's LAN port — allow it, or phones can't connect.
 
 ---
@@ -118,7 +119,7 @@ A throwaway-quality but honest test app, two screens:
 1. **Marker scan screen** — `ViroARImageMarker` tracking the bundled marker; on acquisition, captures the marker's pose and shows "LOCALIZED".
 2. **Shared-space test screen** — renders (a) a virtual pillar fixed at the marker origin, (b) a second pillar at a hardcoded offset, e.g. `(1.5m, 0)` in marker space, and (c) a live readout of the camera's marker-space position and heading (this is `coordinates.ts` getting written for real).
 
-Run it on **two phones simultaneously** (the dev Android + a borrowed second Android). No server needed — both phones use the same hardcoded offsets; agreement is judged physically.
+Run it on **one Android and one iPhone simultaneously**. No server is needed — both phones use the same hardcoded offsets; agreement is judged physically.
 
 ### 5.2 Marker asset
 - A4 print, high-contrast, feature-dense, asymmetric (so orientation is unambiguous), non-glossy paper. Prepare **2–3 candidate designs** and A/B them — marker quality is a first-class variable, not an afterthought.
@@ -136,9 +137,9 @@ Run it on **two phones simultaneously** (the dev Android + a borrowed second And
 | Marker-loss behavior | Cover the marker after localization | Tracking continues inertially; position survives ≥90 s |
 
 ### 5.4 Go / no-go
-- **Go:** all thresholds pass on both phones → proceed to M1 as specced.
+- **Go:** all thresholds pass on the Android and iPhone → proceed to M1 as specced.
 - **Conditional go:** agreement or drift marginally out → widen hit cones (raise `HIT_RADIUS`/`RAY_RADIUS` in `constants.ts`), shorten battle to 60 s, add a "re-scan marker" button to the battle HUD, proceed.
-- **No-go:** acquisition regularly fails or errors exceed ~2× thresholds → **fallback design, decided now, not improvised later:** keep the camera view and the full game, but drop shared world-space rendering. Players stand on organizer-assigned minimap positions; aiming uses gyro-relative heading (calibrated by pointing at the marker once); opponents render as screen-space overlays positioned by bearing. The server, protocol, and all M1 gameplay work are identical in both worlds — that's the payoff of principle §1.3.
+- **No-go:** acquisition regularly fails or errors exceed ~2× thresholds → AR P0 is blocked. The team must explicitly approve a revised non-AR P0 before implementing it; that revised product needs its own state, protocol, UI, and acceptance criteria. It is not silently treated as M1.
 
 **Deliverable:** `M0_RESULTS.md` with the numbers, the chosen marker, and the decision.
 
@@ -210,6 +211,7 @@ export const PLAYER_HIT_RADIUS_M = 0.45;      // deliberately generous; M0 may r
 |---|---|---|
 | C→S | `create_room` | `{ organizerName }` |
 | C→S | `join_room` | `{ code, displayName }` |
+| Organizer→S | `set_combat_included` | `{ playerId, included }` — quiz-only players remain in the room but are excluded from battle readiness |
 | Organizer→S | `configure_arena` | `{ radiusM }` |
 | Organizer→S | `advance_phase` | `{ to: "quiz" \| "localization" }` |
 | C→S | `quiz_submit` | `{ answers: number[] }` |
@@ -218,33 +220,33 @@ export const PLAYER_HIT_RADIUS_M = 0.45;      // deliberately generous; M0 may r
 | C→S | `unlock_position` | `{}` |
 | C→S | `ready_changed` | `{ ready }` |
 | Organizer→S | `start_battle` | `{}` |
-| C→S | `attack` | `{ weapon, dirX, dirZ, clientTs, predictedTargetId? }` — predicted target is **diagnostics only**, never trusted |
+| C→S | `attack` | `{ weapon, dirX, dirZ, predictedTargetId? }` — resolved at server receipt; predicted target is **diagnostics only**, never trusted |
 | S→C | `attack_resolved` | `{ attackerId, targetId \| null, damage, targetShield, targetHp }` |
 | S→C | `player_eliminated` | `{ playerId }` |
 | S→C | `battle_completed` | `{ winnerId, standings }` |
 | S→C | `error` | `{ code, message }` (typed error codes, e.g. `POSITION_OUT_OF_BOUNDS`, `SPACING_VIOLATION`, `ROOM_FULL`) |
 
-Continuous state (player list, phases, HP, positions, `startsAt`) flows through Colyseus **state sync**, not messages; messages are for discrete commands/events only. This keeps LAN traffic tiny (PRD §9 reliability).
+Continuous state (player list, combat inclusion, phases, HP, positions, `startsAt`, and `serverNow`) flows through Colyseus **state sync**, not messages; messages are for discrete commands/events only. Clients calculate a server-time offset from the latest `serverNow` before rendering the countdown. This keeps LAN traffic tiny (PRD §9 reliability).
 
 ### 7.3 Core types
-Carried over from the v1 draft essentially unchanged (`PlayerState`, `RoomState` with phases `lobby → quiz → localization → positioning → countdown → battle → results`), with `ArenaState` simplified: `{ radiusM, status }` — no `cloudAnchorId`; the marker needs no server-side identity.
+`PlayerState` includes `combatIncluded: boolean` (default true); quiz-only players are excluded from arena capacity, positioning, and start gating. `RoomState` keeps phases `lobby → quiz → localization → positioning → countdown → battle → results`, and includes `serverNow` for client countdown alignment. `ArenaState` is `{ radiusM, status }` — no `cloudAnchorId`; the marker needs no server-side identity.
 
 ---
 
 ## 8. Server design (`apps/server`)
 
 ### 8.1 Room lifecycle
-- One Colyseus room class `WarRoom` per battle session; a `codes.ts` registry maps 4-digit codes → roomId (allocate from shuffled pool, never reuse while active, expire with the room after ~2 h idle).
-- First client (`create_room`) becomes organizer; organizer disconnect pauses the room rather than destroying it (grace period), since the whole session depends on them.
+- One Colyseus room class `WarRoom` per battle session; a `codes.ts` registry maps 4-digit codes → roomId (allocate from shuffled pool, never reuse while active, expire with the room after two hours of inactivity).
+- First client (`create_room`) becomes organizer; an organizer disconnect pauses progression for 60 seconds rather than destroying the room.
 - **Reconnection:** use Colyseus 0.17 `onDrop`/`onReconnect` — a dropped participant keeps their `PlayerState` for `DISCONNECT_ELIMINATION_MS` during battle (then auto-eliminated) and indefinitely pre-battle (organizer can remove).
 
 ### 8.2 Phase machine
 Same machine as v1 (§18 of the draft). Every message handler first checks phase validity — e.g. `lock_position` is only legal in `positioning`, `attack` only in `battle` after `startsAt`. Illegal messages get typed `error` responses, never crashes.
 
-**Start invariant** (server-enforced): every included participant is `connected && localized && quizCompleted && position != null && ready`. Countdown emits `startsAt = now + COUNTDOWN_MS`; clients render the countdown from the synchronized state clock.
+**Start invariant** (server-enforced): every combat-included participant is `connected && localized && quizCompleted && position != null && ready`. Quiz-only participants never block the start. Countdown emits `startsAt = now + COUNTDOWN_MS` plus `serverNow`; clients render from their calculated server-time offset.
 
 ### 8.3 Combat resolution
-The ray-vs-circle nearest-target algorithm and shield-before-HP damage order from the v1 draft (§15) carry over **verbatim** — they live in `packages/shared/src/combat.ts` as pure functions; `WarRoom` just calls them. Server-side validation before resolution: attacker alive, phase is battle, `now ≥ startsAt`, cooldown elapsed (`nextAttackAt`), charges available, direction vector normalizable.
+The ray-vs-circle nearest-target algorithm and shield-before-HP damage order from the v1 draft (§15) carry over **verbatim** — they live in `packages/shared/src/combat.ts` as pure functions; `WarRoom` just calls them. Server-side validation before resolution: attacker alive, phase is battle, `now ≥ startsAt`, cooldown elapsed (`nextAttackAt`), charges available, direction vector normalizable. P0 resolves attacks at server receipt; it has no client-clock lag compensation.
 
 Match end: last-alive, or timer (server `setTimeout` anchored to `startsAt + DURATION_MS`) → highest HP → quiz score tiebreak. Results broadcast once; organizer can `reset` back to lobby retaining players for round two.
 
@@ -260,7 +262,7 @@ No AR concepts, no camera data, no trust in client-computed hits, no persistence
 - `battleStore` — high-frequency local data: my live aim direction, predicted target, effect queue. Kept separate so 10 Hz aim updates don't re-render lobby UI.
 
 ### 9.2 Screens (React Navigation, ~10)
-Home → Create/Join → Lobby (organizer variant shows minimap + phase controls) → Quiz → Rewards + character pick → Marker scan (guided) → Position lock → Battle (AR view + HUD) → Results. Eliminated players stay on Battle in spectator mode (controls hidden). Screens are deliberately thin — logic lives in stores/shared.
+Home → Create/Join → Lobby (organizer variant shows minimap + phase controls) → Quiz → shield reward summary → Marker scan (guided) → Position lock → Battle (AR view + HUD) → Results. P0 uses a default avatar. Eliminated players stay on Battle behind a non-interactive eliminated overlay with live standings; free spectator navigation is P1. Screens are deliberately thin — logic lives in stores/shared.
 
 ### 9.3 The AR contract (only Viro importer)
 
@@ -298,10 +300,10 @@ The AR session mounts only on the Marker-scan, Position-lock, and Battle screens
 
 | Layer | Tool | What | Devices needed |
 |---|---|---|---|
-| Unit | vitest in `shared/` | geometry, combat (incl. the v1 §22 cases: aligned targets, boundary, spacing, shield order, tiebreaks), rewards, coordinate fixtures | none |
-| Integration | `@colyseus/testing` in `server/` | full flows: create/join/full-room/dup-names; quiz→rewards; start invariant blocking; attack→damage broadcast; elimination→winner; reconnect-reattach; disconnect-timeout elimination | none |
-| Device — AR | manual protocol | M0 metrics re-run per marker/OS change | 2 phones |
-| Device — E2E | scripted manual runs | the M1 demo script (§12) on 2, then 3–4 phones; marker-loss mid-battle; server kill/restart mid-lobby | 2–4 phones |
+| Unit | vitest in `shared/` | geometry, combat (including aligned targets, boundary, spacing, shield order, and quiz-score tiebreaks), rewards, coordinate fixtures | none |
+| Integration | `@colyseus/testing` in `server/` | full flows: create/join/full-room/dup-names; quiz-only participant; shield rewards; start invariant blocking; attack→damage broadcast; elimination→winner; reconnect-reattach; disconnect-timeout elimination | none |
+| Device — AR | manual protocol | M0 metrics re-run per marker/OS change on Android and iOS | one Android + one iPhone |
+| Device — E2E | scripted manual runs | M1 demo twice on 3–4 mixed-platform devices; marker-loss mid-battle; server kill/restart mid-lobby | at least one Android + one iPhone |
 
 CI (GitHub Actions): typecheck + unit + integration on every push. Device tests are checklists in the repo (`docs/device-test.md`), run before each milestone exit.
 
@@ -321,30 +323,28 @@ CI (GitHub Actions): typecheck + unit + integration on every push. Device tests 
 Strict order within milestones; nothing starts before its predecessor's exit criteria.
 
 ### M0 — Colocation spike *(exit: `M0_RESULTS.md` with go/conditional/no-go)*
-1. Environment setup through first green on-device build (§4).
+1. Environment setup through first green Android and iOS on-device builds (§4).
 2. Marker candidates + `arcoreimg` scoring.
-3. Spike app (§5.1), two-phone measurement protocol, decision.
+3. Spike app (§5.1), Android+iPhone measurement protocol, decision.
 
-### M1 — Vertical slice *(exit: PRD demo criteria on 3–4 Androids, twice in a row)*
+### M1 — Vertical slice *(exit: PRD demo criteria on 3–4 devices including Android and iOS, twice in a row; the iOS rehearsal binary is in TestFlight)*
 1. Workspace scaffolding; `shared/` types + constants + protocol; vitest wiring.
 2. `geometry.ts` + `combat.ts` + `rewards.ts` with full unit tests. *(No devices needed — pure TDD.)*
 3. Server: codes, `WarRoom` lifecycle + phase machine + validation; integration tests green.
-4. Mobile net/ + stores + non-AR screens (Home→Lobby→Quiz→Rewards); testable against the real server with **zero AR** — two phones in a lobby answering quizzes is the first end-to-end checkpoint.
+4. Mobile net/ + stores + non-AR screens (Home→Lobby→Quiz→Shield rewards); testable against the real server with **zero AR** — one Android and one iPhone in a lobby answering quizzes is the first end-to-end checkpoint.
 5. `coordinates.ts` (with fixtures) + `ArenaSession` marker localization + position lock flow; organizer minimap.
 6. Battle: aim publishing, attack round-trip, HUD, effects, elimination, results.
 7. Multi-device testing, tuning (hit radii, cooldowns), demo rehearsal ×2.
 
 ### M2 — Hardening *(exit: a stranger runs a session from a one-page guide)*
-Fireball + charges; 3 sprites + colors; spectator mode; **minimap fallback mode** (the §5.4 fallback rendered as a first-class feature); tracking-loss pause + re-scan; organizer remove/reset; reconnection polish; the one-page organizer guide.
-
-### M3 — iOS *(sketch)*
-EAS cloud build + TestFlight; re-run M0 measurement protocol on iPhone; mixed-OS session test. No code architecture changes anticipated — Viro and Expo are cross-platform by design.
+Fireball + charges; 3 sprites + colors; spectator mode; **minimap fallback mode** with its own mode, assignment, and readiness protocol; tracking-loss pause + re-scan; organizer remove/reset; reconnection polish; the one-page organizer guide.
 
 ---
 
 ## 13. Definition of done (applies to every milestone)
 - Typecheck + all unit/integration tests green.
 - Device checklist for the milestone passed and dated in the repo.
+- P0 exits only after the mixed Android+iOS device checklist has passed twice.
 - No unpinned load-bearing dependency changed; lockfile diff reviewed.
 - Tunables still live only in `constants.ts`; Viro imports still confined to `ar/`.
 - `PRD.md` decision log updated if any settled decision changed.

@@ -1,9 +1,9 @@
 # CodexWars — Product Requirements Document
 
-**Version:** 2.0
-**Status:** Approved direction — supersedes `CODEXWARS_PRD_TDD.md` (v1 draft, retained for reference)
+**Version:** 2.1
+**Status:** Approved direction — the active technical specifications are `BUILD_SPEC.md` and `ARCHITECTURE.md`; `CODEXWARS_PRD_TDD.md` is retired reference material
 **Horizons:** Hackathon demo first → evolve into a real product
-**Primary platform:** Android (iOS follows via EAS cloud builds — no Mac available for local builds)
+**Primary platforms:** Android and iOS (both required for P0; iOS iterates through EAS cloud development builds and is rehearsed through TestFlight on physical iPhones)
 **Last updated:** 2026-07-14
 
 ---
@@ -24,11 +24,13 @@ These decisions were made after researching the July 2026 AR landscape and the h
 |---|---|---|
 | D1 | **Marker-based colocation replaces ARCore Cloud Anchors** as the shared-origin mechanism. A printed image marker on the floor is the arena origin; every phone scans it. | The hosted spatial-anchor market collapsed in 2024–2026 (Azure Spatial Anchors retired Nov 2024; Niantic Lightship Shared AR shut down May 2026; 8th Wall hosted service ended Feb 2026). Google Cloud Anchors survives but is in maintenance mode. Marker colocation needs no third-party spatial cloud, is cross-platform, more predictable in feature-poor rooms, and is what indie colocated-AR projects have converged on. |
 | D2 | **Keep the stack: React Native + Expo (dev build) + @reactvision/react-viro + Colyseus + TypeScript.** | Viro is actively maintained again (ReactVision spin-out, releases through June 2026, RN New Architecture + current Expo support) and ships the image-marker API (`ViroARImageMarker`) that D1 needs. Colyseus 0.17 (Feb 2026) adds automatic reconnection — a direct fit for mobile churn. One language across app, AR, and server suits a TS-strong solo developer. |
-| D3 | **Android-first for real, not as a fallback.** iOS arrives post-hackathon via Expo EAS cloud builds + TestFlight. | Development machine is Windows; no Mac means no local iOS builds or debugging. Pretending iOS is a hackathon-day option burns the scarcest resource (time). The RN codebase keeps iOS cheap later. |
+| D3 | **Android and iOS are both P0 platforms.** Android is developed locally; iOS iterates through EAS cloud development builds and its rehearsal build is distributed through TestFlight to a physical ARKit-compatible iPhone. | The shared React Native codebase and marker-based origin make mixed-platform play a core product claim. Windows cannot build iOS locally, so a paid Apple Developer account, EAS cloud build, registered iPhone, TestFlight configuration, and early device testing are mandatory P0 dependencies. |
 | D4 | **Battles are hard-capped at 90 seconds** (default 60s). | Sustained camera + AR inference thermally throttles phones in roughly 60–90 seconds; battery drain and arm fatigue ("gorilla arm") compound it. Short battles are also better pacing for a classroom finale. |
-| D5 | **Non-AR fallback mode is a P1 requirement, not an afterthought.** A participant whose phone can't localize plays the same battle from a top-down minimap view. | Every comparable colocated-AR product died partly from device fragmentation. Combat is already 2D server-side, so a 2D client view is cheap insurance that one bad phone can't ruin a 12-person session. |
+| D5 | **Non-AR fallback mode is a P1 requirement, not an afterthought.** A participant whose phone cannot localize plays the same battle from a top-down minimap view. | Combat is already 2D server-side, so a 2D client view is cheap insurance against device fragmentation. If M0 fails, AR P0 is blocked; switching to a non-AR P0 requires an explicit revised-product decision rather than silently changing scope. |
 | D6 | **Quiz rewards become a budget of choices with catch-up mechanics on the product roadmap** (flat mapping stays for the hackathon MVP). | Gimkit/Blooket research: successful platforms map score to spendable resources plus randomness/steal mechanics. "Quiz winner automatically wins the battle" is a documented failure mode — the battle must favor the quiz winner, not crown them. |
 | D7 | **Privacy-minimal by design: nickname-only joins, no accounts, no camera upload, no third-party ad/analytics SDKs.** | Classroom tools spread teacher-driven and bottom-up; COPPA applies to under-13 users regardless of who consented. Minimal data collection keeps a single teacher able to run a session with zero IT approval. |
+| D8 | **P0 uses a default avatar, basic bolt, and shield-only quiz rewards.** Fireball, character choice, and free spectator view are P1. | This removes unusable P0 rewards and keeps the first mixed-platform battle small enough to verify on real devices. |
+| D9 | **P0 tracking loss is local and non-pausing during battle.** Before battle it clears readiness; during battle the player continues from their last valid transform with a re-scan prompt. | A global pause is too disruptive for the vertical slice. Organizer-controlled pause/recovery policy is P1. |
 
 ---
 
@@ -44,7 +46,7 @@ These decisions were made after researching the July 2026 AR landscape and the h
 ### Participant (student / attendee)
 - Joins with the room code and a nickname (no account)
 - Answers the quiz; receives battle powers
-- Picks a character sprite and color
+- Uses the P0 default avatar (sprite/color selection is P1)
 - Scans the floor marker to localize, locks a standing position
 - Battles: rotates in place, aims through the camera, fires
 
@@ -56,7 +58,7 @@ These decisions were made after researching the July 2026 AR landscape and the h
 
 ### Product goals
 1. Make quiz results immediately meaningful through battle powers.
-2. Deliver a reliable colocated AR battle on participants' own Android phones.
+2. Deliver a reliable colocated AR battle across participants' Android phones and iPhones.
 3. Keep a single organizer able to run a full session in under 15 minutes with no IT support.
 4. Keep combat deterministic and server-authoritative on a 2D floor plane — AR is presentation, not physics.
 5. Hackathon horizon: a complete, rehearsed vertical slice on 3–4 devices.
@@ -70,7 +72,7 @@ These decisions were made after researching the July 2026 AR landscape and the h
 - Public matchmaking or play between people not in the same room
 
 ### Additional hackathon non-goals
-- iOS build, accounts/auth, persistence, organizer-authored quizzes, teams, tournaments, anti-cheat beyond server authority
+- Accounts/auth, persistence, organizer-authored quizzes, teams, tournaments, anti-cheat beyond server authority
 
 ---
 
@@ -88,11 +90,11 @@ These decisions were made after researching the July 2026 AR landscape and the h
 ### 5.2 Participant flow
 1. **Join War** → four-digit code + nickname.
 2. Completes the quiz (MVP: 3 multiple-choice questions), sees earned powers.
-3. Picks a character sprite and color.
+3. Continues with the default P0 avatar (sprite and color choice arrive in P1).
 4. Points the camera at the floor marker until the app localizes ("Arena found!").
 5. Stands anywhere valid in the arena, **Lock My Position** (server validates boundary + spacing), then **Ready**.
 6. On start: rotates in place, aims via the camera crosshair at real classmates (rendered with sprite, name, and health bar), fires with on-screen buttons.
-7. Sees hits, eliminations, and the winner. Eliminated players spectate.
+7. Sees hits, elimination, and the winner. In P0, an eliminated player sees a non-interactive eliminated overlay with live standings; free spectator view is P1.
 8. If AR localization fails after guided retries → **minimap mode** (P1): same battle, top-down aiming.
 
 ---
@@ -116,7 +118,7 @@ These decisions were made after researching the July 2026 AR landscape and the h
 - The client's predicted target is diagnostic only — the server never trusts a client-sent target ID.
 
 ### 6.4 Health, elimination, match end
-- 100 HP per player; 0 HP → eliminated → spectator.
+- 100 HP per player; 0 HP → eliminated → P0 eliminated overlay (free spectator view is P1).
 - Battle ends when one player remains **or the timer expires (default 60 s, hard cap 90 s — see D4)**.
 - Timer expiry: highest remaining HP wins; ties break by quiz score.
 
@@ -127,8 +129,8 @@ These decisions were made after researching the July 2026 AR landscape and the h
 |---:|---|
 | 0 | Basic attack only |
 | 1 | +10 starting shield |
-| 2 | +1 fireball charge |
-| 3 | +20 shield and +1 fireball charge |
+| 2 | +20 starting shield |
+| 3 | +30 starting shield |
 
 **Product (per D6):** quiz score becomes a **point budget spent on a loadout** (shield / extra charges / one-time abilities), with:
 - a guaranteed minimum kit (floor) and diminishing returns at the top (cap),
@@ -147,20 +149,20 @@ so the quiz winner is favored, never guaranteed.
 
 ## 7. Feature scope
 
-### P0 — hackathon vertical slice (nothing else starts until this works end-to-end on 2 phones)
+### P0 — hackathon vertical slice (nothing else starts until this works end-to-end on one Android phone and one iPhone)
 - **Room/lobby:** create room (4-digit code), join with code + nickname, live participant list, capacity 12, ready states
-- **Quiz:** 3 fixed MCQs, scoring, deterministic reward mapping, completion visible to organizer
+- **Platforms:** Android and iOS device builds; the M1 rehearsal includes at least one physical phone of each platform
+- **Quiz:** 3 fixed MCQs, scoring, deterministic shield-only reward mapping, completion visible to organizer
 - **Colocation:** bundled printable marker; marker scan → localization state; circular arena boundary
 - **Positioning:** lock marker-relative X/Z; server validates boundary + spacing; organizer minimap
-- **Battle:** synchronized countdown; crosshair + floor-projected aim; server-authoritative 2D hit testing; basic attack; HP + shield; cooldowns; elimination; winner; 60 s timer
-- **Feedback:** target name/HP on lock, projectile/flash + hit effects, sound or haptics, winner screen
+- **Battle:** synchronized countdown; crosshair + floor-projected aim; server-authoritative 2D hit testing; basic attack; HP + shield; cooldowns; elimination overlay + live standings; winner; 60 s timer
+- **Feedback:** target name/HP on lock, projectile/flash + hit effects, sound or haptics, winner screen; default avatar only
 
 ### P1 — after P0 works
 - Fireball; 3 character sprites + color choice
 - Spectator view for eliminated players
 - **Non-AR minimap fallback mode** (D5)
 - Tracking-loss pause; organizer force-remove/reset player
-- iOS via EAS cloud build + TestFlight
 
 ### P2 — product horizon
 - Organizer-authored quizzes; AI-generated questions from workshop notes
@@ -175,41 +177,42 @@ so the quiz winner is favored, never guaranteed.
 
 ### FR-1: Create room
 Organizer creates a room and receives an active four-digit code.
-- Exactly four digits; active codes never collide; room expires after the event window; creator gets host privileges.
+- Exactly four digits; active codes never collide; room expires after two hours of inactivity; creator gets host privileges.
 
 ### FR-2: Join room
 Participant joins with code + nickname.
 - Invalid/expired code → clear inline error, entered name retained.
 - Duplicate nicknames get a suffix; participant #13 is rejected.
+- Before the quiz, the organizer may mark a participant quiz-only; quiz-only participants do not need AR localization or a position and never block battle start.
 
 ### FR-3: Localize via marker
 Each client establishes the shared arena origin by recognizing the floor marker.
 - App bundles the marker image and a printable PDF.
 - Client reports localization state (`searching` / `localized` / `lost`) to the server.
-- Guided scan UX with retry; battle start is blocked for unlocalized participants (unless in fallback mode, P1).
-- Marker loss after position lock does not invalidate the locked position (players are stationary; aiming continues on inertial tracking, with a re-scan prompt).
+- Guided scan UX with retry; AR P0 battle start is blocked for unlocalized combat participants. P1 minimap participants use a separately defined readiness path.
+- Before countdown, loss clears readiness. After position lock during P0 battle, loss does not invalidate the locked position: aiming continues from the last valid transform with a re-scan prompt.
 
 ### FR-4: Lock position
 - Stored as marker-relative X/Z; rejected outside the boundary or violating minimum spacing, with directional guidance; unlockable before start; visible on the organizer minimap.
 
 ### FR-5: Start battle
-- Server permits start only when every included participant is connected, localized, quiz-complete, positioned, and ready.
-- Server emits a future `startsAt`; all clients run a synchronized countdown.
+- Server permits start only when every combat-included participant is connected, localized, quiz-complete, positioned, and ready; quiz-only participants are excluded from this invariant.
+- Server emits a future `startsAt` and a server-time offset; all clients run the countdown from server time.
 
 ### FR-6: Resolve attack
-- Client sends weapon + aim direction (never a trusted target ID) + client timestamp.
+- Client sends weapon + aim direction (never a trusted target ID); P0 resolves attacks at server receipt time.
 - Server rejects attacks during cooldown, before start, from eliminated players.
 - Nearest eligible ray-circle intersection wins; shield absorbs before HP; authoritative result broadcast to all clients.
 
 ### FR-7: Complete battle
-- Eliminated players cannot attack; battle ends at last-player-standing or timer expiry; all clients agree on the winner; organizer can reset to lobby for another round.
+- Eliminated players cannot attack; in P0 they see an eliminated overlay with live standings. Battle ends at last-player-standing or timer expiry; all clients agree on the winner; organizer can reset to lobby for another round.
 
 ---
 
 ## 9. Non-functional requirements
 
 ### Performance & thermals
-- ≥30 FPS on a mid-range 2023+ Android phone; low-res sprites, pooled effects, labels culled to near-view players.
+- ≥30 FPS on a mid-range 2023+ Android phone and the designated ARKit-compatible iPhone; low-res sprites, pooled effects, labels culled to near-view players.
 - Attacks feel responsive at ≤250 ms round trip.
 - **Total continuous AR camera time per participant ≤3 minutes per session** (localization + battle) to stay ahead of thermal throttling; the camera is off during lobby/quiz.
 
@@ -226,6 +229,7 @@ Each client establishes the shared arena origin by recognizing the floor marker.
 ### Privacy (D7)
 - No camera frames ever leave the device; no facial recognition; camera purpose explained at permission time.
 - Nickname-only participants, no student accounts, no third-party ads/analytics SDKs, data minimization throughout.
+- Room and nickname state is in-memory only and deleted on room expiry; operational logs redact nicknames and use a short retention period; reconnect tokens are random and short-lived.
 
 ### Accessibility
 - Target lock never communicated by color alone; hits paired with sound/haptics; high-contrast panels and scrims over camera backgrounds; organizer can include someone in the quiz but exclude them from combat.
@@ -236,13 +240,14 @@ Each client establishes the shared arena origin by recognizing the floor marker.
 
 | Risk | Impact | Mitigation |
 |---|---|---|
-| Viro image-marker tracking is jittery/slow on real devices | Critical | **First technical gate** (see build spec): prove 2-device marker colocation before any feature work; generous hit cones; guided scan UX; re-scan affordance |
+| Viro image-marker tracking is jittery/slow on real devices | Critical | **First technical gate** (see build spec): prove Android-to-iOS marker colocation before any feature work; generous hit cones; guided scan UX; re-scan affordance |
 | Per-device drift after marker scan misaligns aim | High | Stationary players, wide cones, aim assist, optional re-scan; battles too short for major drift |
-| Device fragmentation (some phones can't AR) | High | P1 minimap fallback mode; ARCore-support check at join |
+| iOS build, signing, or marker regression | Critical | Build and test an ARKit-compatible iPhone in M0; no Android-only completion path for P0 |
+| Device fragmentation (some phones can't AR) | High | P1 minimap fallback mode; ARCore/ARKit support check at join |
 | Thermal throttling mid-battle | Medium | 60–90 s battles, camera off outside AR phases, sprite-based rendering |
 | School WiFi jitter/congestion | Medium | Fixed positions + discrete attack events (not continuous sync); hotspot guidance |
 | ViroReact regression (small maintainer) | Medium | Pin versions; combat/net layer is Viro-independent; Unity port remains possible without touching the server |
-| Scope creep before the vertical slice works | High | Hard P0 gate; no P1 work until P0 runs on two phones |
+| Scope creep before the vertical slice works | High | Hard P0 gate; no P1 work until P0 runs on an Android phone and an iPhone |
 | Physical crowding at 12 players | Medium | Spacing validation, capacity enforcement, stationary rules |
 
 ---
@@ -251,14 +256,13 @@ Each client establishes the shared arena origin by recognizing the floor marker.
 
 | Milestone | Contents | Exit criteria |
 |---|---|---|
-| **M0 — Colocation spike** | Expo dev build + Viro on 2 Android phones; both scan one marker; a test object appears in the same physical spot | Go/no-go on marker colocation quality |
-| **M1 — Hackathon vertical slice (P0)** | Full flow: create → join → quiz → localize → lock → battle → winner, on 3–4 Android devices | Demo success criteria below |
+| **M0 — Colocation spike** | Expo/Viro builds on one Android and one iPhone; both scan one marker; a test object appears in the same physical spot | Go/conditional/no-go on cross-platform marker quality; no-go blocks AR P0 pending an explicit revised-product decision |
+| **M1 — Hackathon vertical slice (P0)** | Full flow: create → join → quiz → localize → lock → battle → winner, on 3–4 devices including Android and iOS; final iOS rehearsal build distributed through TestFlight | Demo success criteria below, twice in a row |
 | **M2 — Hardening (P1)** | Fireball, sprites/colors, spectator view, minimap fallback, reconnection polish | A stranger can run a session from a one-page guide |
-| **M3 — iOS** | EAS cloud build, TestFlight, cross-platform marker testing | Mixed Android/iOS session works |
-| **M4 — Product (P2)** | Authored quizzes, loadout economy, big-screen spectator view, analytics | First real classroom pilots |
+| **M3 — Product (P2)** | Authored quizzes, loadout economy, big-screen spectator view, analytics | First real classroom pilots |
 
 ### Demo success criteria (M1)
-1. Organizer creates a room and shows the code; ≥2 participants join and answer the quiz.
+1. Organizer creates a room and shows the code; ≥2 participants join and answer the quiz, including at least one Android and one iPhone.
 2. All participants localize on the printed marker and lock distinct positions; organizer sees them on the minimap.
 3. Battle starts with a synchronized countdown; one participant aims at another and gets target-lock feedback.
 4. An attack produces synchronized damage on both phones; a player is eliminated; the same winner shows everywhere.

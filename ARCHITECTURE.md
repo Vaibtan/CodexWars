@@ -30,9 +30,9 @@ flowchart TB
         subgraph LAPTOP["Windows laptop"]
             SRV["Colyseus server (Node 22)<br/>in-memory state only"]
         end
-        P1["Organizer phone<br/>(Expo dev build)"]
-        P2["Participant phone 1"]
-        P3["Participant phone 2..12"]
+        P1["Organizer phone<br/>(Android or iOS dev build)"]
+        P2["Participant phone 1<br/>(Android or iOS)"]
+        P3["Participant phone 2..12<br/>(mixed platform)"]
     end
     MARKER["Printed A4 marker on floor<br/>(shared coordinate origin — passive, no electronics)"]
     P1 <-->|WebSocket| SRV
@@ -120,7 +120,7 @@ sequenceDiagram
     V->>S: ArPose {position} (camera pose in marker space)
     S->>N: lock_position {x, z}
     N->>SRV: forward
-    SRV->>SRV: validate: inside radius? ≥ MIN_SPACING from all locked?
+    SRV->>SRV: validate: combatIncluded? inside radius? ≥ MIN_SPACING from all locked combat players?
     alt valid
         SRV-->>N: state sync: player.position set
     else invalid
@@ -142,9 +142,9 @@ sequenceDiagram
     Note over B: ar/ publishes ArPose at ~10Hz continuously
     HUD->>B: fire pressed
     B->>B: read latest aimDir; run shared resolveAttack for prediction
-    B->>N: attack {weapon, dirX, dirZ, clientTs, predictedTargetId}
+    B->>N: attack {weapon, dirX, dirZ, predictedTargetId}
     N->>SRV: forward
-    SRV->>SRV: validate: phase=battle, now≥startsAt, alive,<br/>cooldown elapsed, charges>0, |dir|≈1
+    SRV->>SRV: validate at server receipt: phase=battle, now≥startsAt,<br/>alive, cooldown elapsed, charges>0, |dir|≈1
     SRV->>SRV: resolveAttack(attacker, dir, weapon, players)  ← shared/combat.ts
     SRV->>SRV: applyDamage: shield → HP → clamp → eliminated?
     SRV->>ALL: attack_resolved {attackerId, targetId|null, damage, targetShield, targetHp}
@@ -166,18 +166,18 @@ sequenceDiagram
     participant ALL as all clients
 
     ORG->>SRV: start_battle
-    SRV->>SRV: check start invariant for every included participant:<br/>connected ∧ localized ∧ quizCompleted ∧ position≠null ∧ ready
+    SRV->>SRV: check start invariant for every combat-included participant:<br/>connected ∧ localized ∧ quizCompleted ∧ position≠null ∧ ready
     alt invariant fails
         SRV-->>ORG: error {NOT_READY, blockers: [playerIds]}
     else ok
         SRV->>SRV: phase=countdown; startsAt = serverNow + COUNTDOWN_MS
-        SRV->>ALL: state sync {phase, startsAt}
-        ALL->>ALL: render countdown from startsAt (server clock via Colyseus)
+        SRV->>ALL: state sync {phase, startsAt, serverNow}
+        ALL->>ALL: render countdown from startsAt using calculated server-time offset
         SRV->>SRV: at startsAt: phase=battle; arm battle timer
     end
 ```
 
-Clients never count down from a local "5"; they render `startsAt − serverNow`, so a phone that receives the sync late still agrees on the start instant.
+Clients never count down from a local "5"; they render `startsAt − (localNow + serverTimeOffset)`, so a phone that receives the sync late still agrees on the start instant.
 
 ### 4.4 Disconnect and reconnect
 
@@ -213,7 +213,7 @@ Key property: **position, HP, and rewards live on the server**, so a phone reboo
 stateDiagram-v2
     [*] --> lobby: create_room
     lobby --> quiz: organizer advance_phase
-    quiz --> localization: all included players quizCompleted
+    quiz --> localization: all combat-included players quizCompleted
     localization --> positioning: arena configured ∧ players localizing
     positioning --> countdown: start_battle ∧ start invariant holds
     countdown --> battle: startsAt reached
@@ -231,18 +231,19 @@ stateDiagram-v2
     [*] --> initializing: AR screen mounts
     initializing --> searching: Viro session ready
     searching --> localized: marker acquired (T_marker captured)
-    localized --> tracking_lost: tracking degrades / marker never re-found
+    localized --> tracking_lost: tracking degrades / marker no longer tracked
     tracking_lost --> searching: user taps re-scan
     tracking_lost --> localized: tracking recovers inertially
     localized --> [*]: AR screen unmounts (camera off — thermal rule)
 ```
 
-Only transitions in/out of `localized` are reported to the server; the rest is local UX.
+Only transitions in/out of `localized` are reported to the server. Before countdown, loss clears readiness. During P0 battle, the client keeps the last valid transform, shows a re-scan prompt, and does not pause the shared match; organizer-controlled pause is P1.
 
 ### 5.3 Player lifecycle (server-owned, per participant)
 
 ```
-joined → quiz_done → localized → positioned → ready ──battle──► alive ─┬─► eliminated → spectator
+joined → quiz_done → localized → positioned → ready ──battle──► alive ─┬─► eliminated → P0 eliminated overlay
+   quiz_only ─────────────────────────────────────────────────────────────┘
    (any state) ⇄ disconnected(grace) — state retained, timers per §4.4  └─► winner
 ```
 
@@ -261,8 +262,9 @@ Y is discarded at the `ar/` boundary. There is no coordinate translation on the 
 
 | Data | Written by | Read by |
 |---|---|---|
-| Phase, `startsAt`, positions, HP/shield/charges, eliminations, winner | **Server only** | all clients via state sync |
+| Phase, `startsAt`, `serverNow`, combat inclusion, positions, HP/shield/charges, eliminations, winner | **Server only** | all clients via state sync |
 | Localization status, ready flag, quiz answers, attack commands | Owning client (as *requests*) | server validates, then owns the result |
+| Combat inclusion | Organizer (as a request) | server validates, then owns the result |
 | Live aim pose, predicted target, effect animations | Owning client only | never networked (aim ships only inside discrete `attack` messages) |
 
 This is why bandwidth stays trivial: continuous data (aim at 10 Hz) never crosses the network; only button presses and server verdicts do.
@@ -280,12 +282,14 @@ Checked in code review and, where possible, by tests:
 5. **I-5** Every client→server message handler: phase gate → payload validation → state mutation → sync/broadcast, in that order.
 6. **I-6** All state mutations happen on the server inside `WarRoom`; clients render synced state and local prediction, never locally-mutated authority.
 7. **I-7** AR camera is active only on marker-scan, position-lock, and battle screens (thermal budget, PRD D4).
+8. **I-8** P0 start gating applies only to `combatIncluded` players; a quiz-only player has no position and cannot block battle start.
+9. **I-9** P0 attack resolution uses server receipt time; client clocks never decide combat order.
 
 ---
 
 ## 8. Extension seams (how M2+/product features attach without surgery)
 
-- **Minimap fallback mode (P1):** a second implementation of the `ArPose` producer — positions from organizer assignment, aim from gyro heading — behind the same contract. Battle screen swaps the camera view for a top-down canvas; stores, net, server untouched.
+- **Minimap fallback mode (P1):** a second implementation of the `ArPose` producer — positions from organizer assignment and aim from gyro heading — plus explicit `playMode`, assignment, calibration, and readiness fields in the protocol/server state. The battle screen swaps the camera view for a top-down canvas; combat resolution remains unchanged.
 - **Big-screen spectator view (P2):** a new read-only Colyseus client (web page on the laptop/projector) consuming the same state sync; zero server changes beyond a `spectator` join option.
 - **Loadout economy (P2):** replaces `rewards.ts` mapping + adds a shop screen between quiz and localization; combat layer unchanged.
 - **Teams/tournaments (P2):** additional fields on `PlayerState`/`RoomState` + winner logic variants in `combat.ts`; the phase machine gains no new states until tournaments (which compose rooms rather than complicate one).
