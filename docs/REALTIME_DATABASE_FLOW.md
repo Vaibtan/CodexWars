@@ -75,6 +75,7 @@ await client.send({ type: "open_quiz_question", questionId, questionIndex, endsA
 ## Consistency invariants
 
 - Room commands are idempotent: only `pending` commands resolve, and retries return the existing resolution.
+- Authenticated room-allocation transactions may read only an unused room-code location; existing room projections remain private to their organizer and members.
 - Every authoritative mutation increments `revision`; every action event increments `eventSequence`.
 - Exactly ten scored questions are required before battle stats exist.
 - Quiz progression is organizer-owned; participant answer writes never move the current question.
