@@ -17,6 +17,7 @@ type ParticipantPlacementScreenProps = {
   onBack: () => void;
   onReady: (participant: WaitingParticipant) => void;
   onReturnHome: () => void;
+  onStartBattle: () => void;
   selection: CharacterSelection;
 };
 
@@ -31,6 +32,7 @@ export function ParticipantPlacementScreen({
   onBack,
   onReady,
   onReturnHome,
+  onStartBattle,
   selection,
 }: ParticipantPlacementScreenProps) {
   const [tracking, setTracking] = useState<ArTrackingState>("initializing");
@@ -90,6 +92,14 @@ export function ParticipantPlacementScreen({
 
         <View style={styles.waitingFooter}>
           <Text accessibilityLiveRegion="polite" style={styles.organizerStatus}>Waiting for organizer…</Text>
+          <Pressable
+            accessibilityHint="Opens the participant battle preview"
+            accessibilityRole="button"
+            onPress={onStartBattle}
+            style={({ pressed }) => [styles.startButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.startButtonText}>Organizer started · enter battle</Text>
+          </Pressable>
           <Pressable
             accessibilityRole="button"
             onPress={onReturnHome}
@@ -220,6 +230,8 @@ const styles = StyleSheet.create({
   waitingFooter: { paddingBottom: 12 },
   organizerStatus: { color: colors.accent, fontSize: 15, fontWeight: "800", marginBottom: 12, textAlign: "center" },
   secondaryButton: { alignItems: "center", borderColor: colors.outline, borderRadius: 14, borderWidth: 1, justifyContent: "center", minHeight: 54 },
+  startButton: { alignItems: "center", backgroundColor: colors.accent, borderRadius: 14, justifyContent: "center", marginBottom: 10, minHeight: 56, paddingHorizontal: 16 },
+  startButtonText: { color: colors.accentInk, fontSize: 16, fontWeight: "900", textAlign: "center" },
   secondaryButtonText: { color: colors.ink, fontSize: 15, fontWeight: "800" },
   pressed: { opacity: 0.8, transform: [{ scale: 0.98 }] },
 });

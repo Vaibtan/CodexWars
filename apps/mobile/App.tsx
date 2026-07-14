@@ -5,10 +5,19 @@ import { ArDemoScreen } from "./src/ar/ArDemoScreen";
 import type { CharacterSelection, WaitingParticipant } from "./src/features/characters/types";
 import { ensureAnonymousFirebaseUser } from "./src/lib/firebase/client";
 import { CharacterCustomizationScreen } from "./src/screens/CharacterCustomizationScreen";
+import { BattleResultsScreen } from "./src/screens/BattleResultsScreen";
 import { HomeScreen } from "./src/screens/HomeScreen";
+import { ParticipantBattleScreen } from "./src/screens/ParticipantBattleScreen";
 import { ParticipantPlacementScreen } from "./src/screens/ParticipantPlacementScreen";
 
-type AppScreen = "home" | "ar-demo" | "character-customization" | "participant-placement";
+type AppScreen =
+  | "home"
+  | "ar-demo"
+  | "character-customization"
+  | "participant-placement"
+  | "participant-battle"
+  | "organizer-results"
+  | "participant-results";
 
 const initialSelection: CharacterSelection = {
   characterId: "knight",
@@ -51,13 +60,35 @@ export default function App() {
           onBack={() => setScreen("character-customization")}
           onReady={setWaitingParticipant}
           onReturnHome={() => setScreen("home")}
+          onStartBattle={() => setScreen("participant-battle")}
+          selection={selection}
+        />
+      )}
+      {screen === "participant-battle" && (
+        <ParticipantBattleScreen
+          onBattleComplete={() => setScreen("participant-results")}
           selection={selection}
         />
       )}
       {screen === "ar-demo" && (
         <ArDemoScreen
+          onBattleComplete={() => setScreen("organizer-results")}
           onExit={() => setScreen("home")}
           waitingParticipant={waitingParticipant}
+        />
+      )}
+      {screen === "organizer-results" && (
+        <BattleResultsScreen
+          onDone={() => setScreen("home")}
+          onRunAnotherRound={() => setScreen("ar-demo")}
+          role="organizer"
+        />
+      )}
+      {screen === "participant-results" && (
+        <BattleResultsScreen
+          onDone={() => setScreen("home")}
+          role="participant"
+          selection={selection}
         />
       )}
     </SafeAreaProvider>

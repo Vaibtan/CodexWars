@@ -11,6 +11,7 @@ import { FloorScanScene } from "./scenes/FloorScanScene";
 import type { ArFlowPhase, ArSceneBridge, ArTrackingState, AttackId } from "./types";
 
 type ArDemoScreenProps = {
+  onBattleComplete: () => void;
   onExit: () => void;
   waitingParticipant?: WaitingParticipant | null;
 };
@@ -22,7 +23,7 @@ const trackingCopy: Record<ArTrackingState, string> = {
   unavailable: "Tracking unavailable",
 };
 
-export function ArDemoScreen({ onExit, waitingParticipant }: ArDemoScreenProps) {
+export function ArDemoScreen({ onBattleComplete, onExit, waitingParticipant }: ArDemoScreenProps) {
   const navigatorRef = useRef<InstanceType<typeof ViroARSceneNavigator> | null>(null);
   const [phase, setPhase] = useState<ArFlowPhase>("floor-scan");
   const [floorFound, setFloorFound] = useState(false);
@@ -211,6 +212,20 @@ export function ArDemoScreen({ onExit, waitingParticipant }: ArDemoScreenProps) 
           </View>
         ) : (
           <View pointerEvents="box-none" style={styles.battleContent}>
+            <View style={styles.organizerBattlePanel}>
+              <View style={styles.organizerBattleCopy}>
+                <Text style={styles.healthLabel}>ORGANIZER VIEW</Text>
+                <Text style={styles.organizerBattleTitle}>Battle in progress</Text>
+                <Text style={styles.organizerBattleDetail}>3 players active · demo timer 00:60</Text>
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                onPress={onBattleComplete}
+                style={({ pressed }) => [styles.endBattleButton, pressed && styles.controlPressed]}
+              >
+                <Text style={styles.endBattleButtonText}>End battle</Text>
+              </Pressable>
+            </View>
             <View pointerEvents="none" style={styles.crosshair}>
               <View style={styles.crosshairHorizontal} />
               <View style={styles.crosshairVertical} />
@@ -327,6 +342,12 @@ const styles = StyleSheet.create({
   continueButtonDisabled: { backgroundColor: colors.surfaceStrong },
   continueButtonText: { color: colors.accentInk, fontSize: 16, fontWeight: "800" },
   battleContent: { flex: 1, justifyContent: "flex-end" },
+  organizerBattlePanel: { alignItems: "center", backgroundColor: colors.cameraScrim, flexDirection: "row", left: 14, padding: 14, position: "absolute", right: 14, top: 76 },
+  organizerBattleCopy: { flex: 1 },
+  organizerBattleTitle: { color: colors.ink, fontSize: 18, fontWeight: "900", marginTop: 3 },
+  organizerBattleDetail: { color: colors.inkMuted, fontSize: 12, marginTop: 3 },
+  endBattleButton: { alignItems: "center", borderColor: colors.danger, borderRadius: 12, borderWidth: 1, justifyContent: "center", minHeight: 48, paddingHorizontal: 14 },
+  endBattleButtonText: { color: colors.ink, fontSize: 13, fontWeight: "800" },
   organizerLobby: { flex: 1, justifyContent: "flex-end", padding: 14 },
   lobbyPanel: { backgroundColor: colors.cameraScrim, borderRadius: 16, padding: 17 },
   lobbyHeadingRow: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
