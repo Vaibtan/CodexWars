@@ -20,6 +20,8 @@ const placementSceneSourceUrl = new URL(
   import.meta.url,
 );
 const appSourceUrl = new URL("../App.tsx", import.meta.url);
+const homeSourceUrl = new URL("../src/screens/HomeScreen.tsx", import.meta.url);
+const storySourceUrl = new URL("../src/screens/DemoStoryScreen.tsx", import.meta.url);
 
 test("leaving character customization does not recycle a native Viro preview", async () => {
   const source = await readFile(customizationSourceUrl, "utf8");
@@ -62,4 +64,16 @@ test("the Firebase app flow uses the imported participant and organizer screens"
   assert.match(source, /<OrganizerDashboardScreen/);
   assert.match(source, /<ParticipantQuizScreen/);
   assert.match(source, /<ParticipantQuizResultsScreen/);
+});
+
+test("the home screen opens the native story demo", async () => {
+  const appSource = await readFile(appSourceUrl, "utf8");
+  const homeSource = await readFile(homeSourceUrl, "utf8");
+  const storySource = await readFile(storySourceUrl, "utf8");
+
+  assert.match(appSource, /screen === "demo-story"/);
+  assert.match(appSource, /onShowDemo=\{\(\) => setScreen\("demo-story"\)\}/);
+  assert.match(homeSource, /Watch the CodexWars demo/);
+  assert.match(storySource, /STORY_DURATION_MS = 6_000/);
+  assert.match(storySource, /accessibilityActions=/);
 });

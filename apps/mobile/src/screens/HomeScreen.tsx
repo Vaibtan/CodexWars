@@ -19,10 +19,11 @@ type HomeScreenProps = {
   error: string | null;
   onCreateRoom: (nickname: string) => Promise<void>;
   onJoinRoom: (roomCode: string, nickname: string) => Promise<void>;
+  onShowDemo: () => void;
   onTestAr: () => void;
 };
 
-export function HomeScreen({ busy, error, onCreateRoom, onJoinRoom, onTestAr }: HomeScreenProps) {
+export function HomeScreen({ busy, error, onCreateRoom, onJoinRoom, onShowDemo, onTestAr }: HomeScreenProps) {
   const [step, setStep] = useState<HomeStep>("welcome");
   const [nickname, setNickname] = useState("");
   const [roomCode, setRoomCode] = useState("");
@@ -42,6 +43,11 @@ export function HomeScreen({ busy, error, onCreateRoom, onJoinRoom, onTestAr }: 
               <Text style={styles.copy}>Earn powers through knowledge, meet classmates in the arena, and make every answer count.</Text>
               <ActionButton label="Join as participant" onPress={() => setStep("participant")} />
               <ActionButton label="Join as organizer" onPress={() => setStep("organizer")} secondary />
+              <Pressable accessibilityRole="button" onPress={onShowDemo} style={({ pressed }) => [styles.demoButton, pressed && styles.pressed]}>
+                <View style={styles.demoIcon}><Text style={styles.demoIconText}>▶</Text></View>
+                <View style={styles.demoCopy}><Text style={styles.demoTitle}>Watch the CodexWars demo</Text><Text style={styles.demoMeta}>10 quick stories · about 1 minute</Text></View>
+                <Text style={styles.demoArrow}>›</Text>
+              </Pressable>
               <Pressable accessibilityRole="button" onPress={onTestAr} style={styles.testButton}>
                 <Text style={styles.testButtonText}>Test AR character placement</Text><Text style={styles.testIcon}>◎</Text>
               </Pressable>
@@ -112,6 +118,13 @@ const styles = StyleSheet.create({
   actionSecondary: { backgroundColor: colors.backgroundRaised, borderColor: colors.outline, borderWidth: 1 },
   actionText: { color: colors.ink, fontSize: 16, fontWeight: "900" },
   actionSecondaryText: { color: colors.ink },
+  demoButton: { alignItems: "center", backgroundColor: colors.surfaceStrong, borderRadius: 14, flexDirection: "row", marginTop: 14, minHeight: 64, paddingHorizontal: 12 },
+  demoIcon: { alignItems: "center", backgroundColor: colors.success, borderRadius: 18, height: 36, justifyContent: "center", width: 36 },
+  demoIconText: { color: colors.background, fontSize: 13, fontWeight: "900", marginLeft: 2 },
+  demoCopy: { flex: 1, marginLeft: 11 },
+  demoTitle: { color: colors.ink, fontSize: 14, fontWeight: "900" },
+  demoMeta: { color: colors.inkMuted, fontSize: 11, marginTop: 3 },
+  demoArrow: { color: colors.success, fontSize: 28, marginLeft: 8 },
   pressed: { opacity: 0.8, transform: [{ scale: 0.99 }] },
   disabled: { opacity: 0.45 },
   testButton: { alignItems: "center", flexDirection: "row", justifyContent: "center", minHeight: 52, paddingTop: 10 },
