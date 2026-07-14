@@ -23,7 +23,7 @@
     },
     "warRooms": {
       "$roomId": {
-        ".read": "auth != null && (data.child('organizerId').val() === auth.uid || data.child('members').child(auth.uid).exists())",
+        ".read": "auth != null && (!data.exists() || data.child('organizerId').val() === auth.uid || data.child('members').child(auth.uid).exists())",
         ".write": "auth != null && ((!data.exists() && newData.child('organizerId').val() === auth.uid && newData.child('roomId').val() === $roomId) || (data.exists() && data.child('organizerId').val() === auth.uid && newData.child('organizerId').val() === auth.uid && newData.child('roomId').val() === data.child('roomId').val()))",
         ".validate": "newData.hasChildren(['roomId', 'code', 'organizerId', 'organizerName', 'phase', 'quiz', 'arena', 'roundId', 'revision', 'eventSequence', 'createdAt', 'updatedAt', 'version']) && newData.child('roomId').val() === $roomId && newData.child('code').val() === $roomId && newData.child('version').val() === 1",
         "members": {

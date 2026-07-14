@@ -1,12 +1,38 @@
 # CodexWars
 
-**CodexWars** is a cross-platform multiplayer augmented-reality battle game built for the **OpenAI Codex Hackathon, Gurgaon**.
+**CodexWars** is a multiplayer learning experience built for the **OpenAI Codex Hackathon, Gurgaon**. It turns the end of a classroom lesson or workshop quiz into a shared, physical finale: participants earn battle advantages by answering questions correctly, then use those rewards in a short augmented-reality battle.
 
-Players choose and customize a 3D character, place it in a shared AR arena, and join a live battle managed by an organizer. The experience is designed to run on both iPhone and Android devices using one React Native codebase.
+Think **Kahoot meets laser tag**—the quiz drives learning, and the AR battle makes progress feel immediate, social, and memorable.
 
-## Aim
+## Problem statement
 
-Our goal is to make a shared, social AR experience that is approachable to build and play: participants can personalize their characters, establish their position in the physical space, and take part in a real-time battle together.
+Quizzes are useful for checking understanding, but they often feel disconnected from what happens next. Scores appear, a leaderboard is shown, and the energy quickly disappears. Learners who fall behind may disengage, while facilitators have few ways to turn assessment into a shared experience that the whole room wants to complete.
+
+CodexWars connects knowledge directly to play. Correct answers earn useful battle powers such as starting shields, giving learners an immediate reason to participate and improve. Quiz performance creates an advantage without guaranteeing victory, so the final activity remains inclusive, competitive, and exciting.
+
+## Product
+
+An organizer—such as a teacher or workshop facilitator—creates a room and shares a four-digit code. Participants join with a nickname, complete a quiz, and receive battle rewards based on their answers. They then scan a common floor marker, lock a safe position in the shared arena, and battle through their phone cameras using 3D characters and fantasy effects.
+
+The complete experience is designed to:
+
+- make quiz results immediately meaningful;
+- increase participation and recall through a memorable reward loop;
+- give educators a session they can organize in under 15 minutes;
+- support Android and iPhone participants in the same room;
+- encourage stationary, safely spaced play;
+- protect learner privacy through nickname-only participation and no camera uploads.
+
+The hackathon demo targets 3–4 physical devices, while the room model supports up to 12 participants and one non-combat organizer.
+
+## Experience
+
+1. The organizer creates a room and starts the quiz.
+2. Participants answer questions and earn battle shields.
+3. Everyone scans the same printed marker to establish a shared arena.
+4. Participants lock their positions and wait for the organizer.
+5. The organizer starts a synchronized 60-second AR battle.
+6. Players see the final standings and can begin another learning round.
 
 ## Team
 
@@ -17,9 +43,9 @@ Our goal is to make a shared, social AR experience that is approachable to build
 
 ## Built with Codex
 
-CodexWars was developed entirely with **OpenAI Codex** as a collaborative engineering partner. Every team member used Codex throughout the project.
+CodexWars was developed entirely with **OpenAI Codex** as a collaborative product and engineering partner. Every team member used Codex throughout the project.
 
-We began by turning product ideas into Markdown documents, including the PRD, architecture, AR implementation plan, technical feasibility notes, and API contracts. Those documents became the shared source of context for Codex prompts; we then used Codex to scaffold the app, build features, write tests, integrate assets, and iterate on the implementation.
+We began by turning the idea into Markdown documents and prompts, including the PRD, architecture, AR implementation plan, technical feasibility notes, and API contracts. Those documents became the shared source of context for Codex. We then built on top of them with Codex to scaffold the app, implement features, write tests, integrate 3D assets, troubleshoot device builds, and iterate on the product.
 
 ## Technology
 
@@ -27,7 +53,7 @@ We began by turning product ideas into Markdown documents, including the PRD, ar
 - TypeScript
 - Viro / ARKit / ARCore for AR and 3D rendering
 - GLB character assets
-- Firebase Realtime Database and Anonymous Authentication for planned hackathon live-room updates
+- Firebase Realtime Database and Anonymous Authentication for the planned hackathon realtime layer
 
 ## Project structure
 
