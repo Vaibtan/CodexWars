@@ -12,6 +12,9 @@ firebase-debug.log
 firestore-debug.log
 ui-debug.log
 
+# Local mirror of the canonical skills tracked under .agents/.
+/.claude/
+
 # 3D character source assets are local authoring material. Commit only optimized
 # runtime GLBs that are deliberately placed under assets/characters/runtime/.
 assets/characters/*
