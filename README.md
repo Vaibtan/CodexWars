@@ -1,7 +1,61 @@
 # CodexWars
 
-React Native multiplayer AR battle game. The app is organized as an npm
-workspace so mobile, server, and shared game contracts can evolve separately.
+**CodexWars** is a multiplayer learning experience built for the **OpenAI Codex Hackathon, Gurgaon**. It turns the end of a classroom lesson or workshop quiz into a shared, physical finale: participants earn battle advantages by answering questions correctly, then use those rewards in a short augmented-reality battle.
+
+Think **Kahoot meets laser tag**—the quiz drives learning, and the AR battle makes progress feel immediate, social, and memorable.
+
+## Problem statement
+
+Quizzes are useful for checking understanding, but they often feel disconnected from what happens next. Scores appear, a leaderboard is shown, and the energy quickly disappears. Learners who fall behind may disengage, while facilitators have few ways to turn assessment into a shared experience that the whole room wants to complete.
+
+CodexWars connects knowledge directly to play. Correct answers earn useful battle powers such as starting shields, giving learners an immediate reason to participate and improve. Quiz performance creates an advantage without guaranteeing victory, so the final activity remains inclusive, competitive, and exciting.
+
+## Product
+
+An organizer—such as a teacher or workshop facilitator—creates a room and shares a four-digit code. Participants join with a nickname, complete a quiz, and receive battle rewards based on their answers. They then scan a common floor marker, lock a safe position in the shared arena, and battle through their phone cameras using 3D characters and fantasy effects.
+
+The complete experience is designed to:
+
+- make quiz results immediately meaningful;
+- increase participation and recall through a memorable reward loop;
+- give educators a session they can organize in under 15 minutes;
+- support Android and iPhone participants in the same room;
+- encourage stationary, safely spaced play;
+- protect learner privacy through nickname-only participation and no camera uploads.
+
+The hackathon demo targets 3–4 physical devices, while the room model supports up to 12 participants and one non-combat organizer.
+
+## Experience
+
+1. The organizer creates a room and starts the quiz.
+2. Participants answer questions and earn battle shields.
+3. Everyone scans the same printed marker to establish a shared arena.
+4. Participants lock their positions and wait for the organizer.
+5. The organizer starts a synchronized 60-second AR battle.
+6. Players see the final standings and can begin another learning round.
+
+## Team
+
+- Shubhendu
+- Ankit
+- Vaibhav
+- Mantavya
+
+## Built with Codex
+
+CodexWars was developed entirely with **OpenAI Codex** as a collaborative product and engineering partner. Every team member used Codex throughout the project.
+
+We began by turning the idea into Markdown documents and prompts, including the PRD, architecture, AR implementation plan, technical feasibility notes, and API contracts. Those documents became the shared source of context for Codex. We then built on top of them with Codex to scaffold the app, implement features, write tests, integrate 3D assets, troubleshoot device builds, and iterate on the product.
+
+## Technology
+
+- React Native with Expo SDK 54
+- TypeScript
+- Viro / ARKit / ARCore for AR and 3D rendering
+- GLB character assets
+- Firebase Realtime Database and Anonymous Authentication for the planned hackathon realtime layer
+
+## Project structure
 
 ## Specification map
 
@@ -23,41 +77,25 @@ Backend implementation work is sequenced in the
 
 ```text
 apps/
-  mobile/             Expo / React Native client
-    src/
-      ar/             ARKit/ARCore renderer boundary (Viro goes here later)
-      components/     reusable React Native UI
-      config/         client configuration
-      features/       quiz, lobby, battle features
-      lib/             client utilities
-      navigation/     navigation setup
-      screens/        app screens
-      store/          client state
-  server/             Node.js game API and realtime room server
-    src/
-      config/         server configuration
-      middleware/     transport middleware
-      routes/         HTTP endpoints
-      services/       room and game services
-      types/          backend-only types
+  mobile/       Expo / React Native app
+  server/       Node.js services and game APIs
 packages/
-  shared/             cross-platform domain and protocol types
+  shared/       Cross-platform game and protocol types
+docs/           Product, AR, architecture, and implementation documentation
+assets/         Optimized runtime 3D assets
 ```
 
-## First run
+## Getting started
 
-Use Node 22.23.1 (pinned in `.nvmrc` and the EAS profiles), then install from
-the repository root:
+Use Node.js 22.13 or newer:
 
 ```bash
 npm install
 npm run mobile
 ```
 
-Open the Expo development menu and launch the Android, iOS, or web target. The
-first screen is intentionally non-AR; AR/Viro will require a native development
-build later. Run the starter backend separately with `npm run server`; its
-health endpoint is `http://localhost:4000/health`.
+The AR experience uses native modules, so install a development build on the device; Expo Go cannot load the Viro integration. For device setup guidance, see [docs/PLATFORM_TESTING.md](docs/PLATFORM_TESTING.md).
 
-For the iPhone-on-macOS and Android-on-Windows development-build workflow, see
-[`docs/PLATFORM_TESTING.md`](docs/PLATFORM_TESTING.md).
+## Submission
+
+Built with Codex for the **OpenAI Codex Hackathon — Gurgaon**.

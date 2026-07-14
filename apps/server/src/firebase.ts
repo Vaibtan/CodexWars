@@ -1,4 +1,5 @@
 import { applicationDefault, getApp, getApps, initializeApp, type App } from "firebase-admin/app";
+import { getAuth, type Auth, type DecodedIdToken } from "firebase-admin/auth";
 import { getFirestore, type Firestore } from "firebase-admin/firestore";
 
 function configuredProjectId(): string | undefined {
@@ -20,4 +21,12 @@ export function getFirebaseApp(): App {
 
 export function getFirestoreDb(): Firestore {
   return getFirestore(getFirebaseApp());
+}
+
+export function getFirebaseAuth(): Auth {
+  return getAuth(getFirebaseApp());
+}
+
+export function verifyFirebaseIdToken(idToken: string): Promise<DecodedIdToken> {
+  return getFirebaseAuth().verifyIdToken(idToken);
 }

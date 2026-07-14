@@ -5,17 +5,19 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
+    "seed:quiz": "tsx src/quiz/seedProgrammingFundamentals.ts",
     "start": "tsx src/index.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@codexwars/shared": "0.1.0",
     "firebase-admin": "14.1.0"
   },
   "devDependencies": {
     "@types/node": "22.19.11",
     "tsx": "4.23.1",
-    "typescript": "6.0.3",
+    "typescript": "5.9.3",
     "vitest": "4.1.10"
   }
 }

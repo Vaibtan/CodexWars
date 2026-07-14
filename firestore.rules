@@ -2,6 +2,13 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    match /quizSessions/{sessionId}/results/{uid} {
+      // A participant may read only their own completed result. The trusted
+      // server writes every template, submission, and result through Admin.
+      allow get: if request.auth != null && request.auth.uid == uid;
+      allow list, create, update, delete: if false;
+    }
+
     match /{document=**} {
       // Mobile clients never write game or quiz data directly. The trusted
       // Colyseus server uses Firebase Admin credentials and IAM instead.

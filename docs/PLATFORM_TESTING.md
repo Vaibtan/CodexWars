@@ -12,8 +12,8 @@ game screens, protocol types, and future AR presentation code remain shared.
 | App identity | `com.codexwars.app` for iOS and Android; change it once before first production signing if the team's registered reverse-domain identifier differs |
 | Node runtime | Node 22.23.1, selected with `nvm use` from the repository root |
 | Native workflow | Expo managed/CNG. Do not hand-edit generated `ios/` or `android/` directories. |
-| First screen | Runs in Expo Go on both platforms. |
-| AR work | Requires the `development` build profile because Viro/ARKit/ARCore are native modules; Expo Go is not an AR test target. |
+| App runtime | Uses the `development` build profile because Viro/ARKit/ARCore are native modules; Expo Go cannot load the app. |
+| AR work | Test floor tracking and battle scenes on physical ARKit- and ARCore-capable devices. |
 
 ## iPhone testing — macOS owner
 
@@ -36,8 +36,8 @@ physical iPhone.
 machine over the same LAN/hotspot; use Expo's tunnel option only when LAN is
 unavailable.
 
-For the current non-AR screen, Expo Go is sufficient. Switch to the development
-client before adding `@reactvision/react-viro` or other native AR modules.
+The Viro native module is already installed, so use the development client even
+when testing the non-AR home screen.
 
 ## Cross-platform release gate
 

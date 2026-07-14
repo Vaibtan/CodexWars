@@ -1,0 +1,47 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "roomDirectory": {
+      "$roomId": {
+        ".read": "auth != null",
+        ".write": "auth != null && !data.exists() && newData.child('organizerId').val() === auth.uid && root.child('warRooms').child($roomId).child('organizerId').val() === auth.uid",
+        ".validate": "newData.hasChildren(['roomId', 'organizerId', 'createdAt']) && newData.child('roomId').val() === $roomId"
+      }
+    },
+    "quizAnswers": {
+      "$roomId": {
+        "$questionId": {
+          ".read": "auth != null && root.child('warRooms').child($roomId).child('organizerId').val() === auth.uid",
+          "$uid": {
+            ".read": "auth != null && (auth.uid === $uid || root.child('warRooms').child($roomId).child('organizerId').val() === auth.uid)",
+            ".write": "auth != null && auth.uid === $uid && !data.exists() && root.child('warRooms').child($roomId).child('members').child($uid).exists() && root.child('warRooms').child($roomId).child('phase').val() === 'quiz' && root.child('warRooms').child($roomId).child('quiz').child('status').val() === 'open' && root.child('warRooms').child($roomId).child('quiz').child('currentQuestionId').val() === $questionId && now < root.child('warRooms').child($roomId).child('quiz').child('questionEndsAt').val()",
+            ".validate": "newData.hasChildren(['participantId', 'optionId', 'submittedAt']) && newData.child('participantId').val() === auth.uid && newData.child('optionId').isString() && newData.child('optionId').val().length > 0 && newData.child('optionId').val().length <= 64 && newData.child('submittedAt').isNumber()"
+          }
+        }
+      }
+    },
+    "warRooms": {
+      "$roomId": {
+        ".read": "auth != null && (!data.exists() || data.child('organizerId').val() === auth.uid || data.child('members').child(auth.uid).exists())",
+        ".write": "auth != null && ((!data.exists() && newData.child('organizerId').val() === auth.uid && newData.child('roomId').val() === $roomId) || (data.exists() && data.child('organizerId').val() === auth.uid && newData.child('organizerId').val() === auth.uid && newData.child('roomId').val() === data.child('roomId').val()))",
+        ".validate": "newData.hasChildren(['roomId', 'code', 'organizerId', 'organizerName', 'phase', 'quiz', 'arena', 'roundId', 'revision', 'eventSequence', 'createdAt', 'updatedAt', 'version']) && newData.child('roomId').val() === $roomId && newData.child('code').val() === $roomId && newData.child('version').val() === 1",
+        "members": {
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid && ((!data.exists() && newData.child('id').val() === auth.uid && newData.child('quizCompleted').val() === false && root.child('warRooms').child($roomId).child('phase').val() === 'lobby') || (data.exists() && newData.child('id').val() === data.child('id').val() && newData.child('quizCompleted').val() === data.child('quizCompleted').val() && newData.child('correctAnswers').val() === data.child('correctAnswers').val() && newData.child('totalQuestions').val() === data.child('totalQuestions').val() && newData.child('selection').val() === data.child('selection').val() && newData.child('position').val() === data.child('position').val() && newData.child('readiness').val() === data.child('readiness').val() && newData.child('combatIncluded').val() === data.child('combatIncluded').val()))",
+            ".validate": "newData.hasChildren(['id', 'nickname', 'connected', 'quizCompleted', 'readiness', 'combatIncluded', 'joinedAt', 'updatedAt']) && newData.child('nickname').isString() && newData.child('nickname').val().length > 0 && newData.child('nickname').val().length <= 32"
+          }
+        },
+        "commands": {
+          "$commandId": {
+            ".write": "auth != null && !data.exists() && newData.child('id').val() === $commandId && newData.child('actorId').val() === auth.uid && newData.child('status').val() === 'pending' && ((root.child('warRooms').child($roomId).child('organizerId').val() === auth.uid) || (root.child('warRooms').child($roomId).child('members').child(auth.uid).exists() && (newData.child('type').val() === 'announce_join' || newData.child('type').val() === 'set_lobby_ready' || newData.child('type').val() === 'select_character' || newData.child('type').val() === 'lock_position' || newData.child('type').val() === 'attack')))",
+            ".validate": "newData.hasChildren(['id', 'actorId', 'type', 'status', 'roundId', 'createdAt']) && newData.child('id').val() === $commandId && newData.child('roundId').val() === root.child('warRooms').child($roomId).child('roundId').val() && newData.child('createdAt').isNumber() && (newData.child('status').val() === 'pending' || newData.child('status').val() === 'resolved' || newData.child('status').val() === 'rejected')"
+          }
+        },
+        "events": {
+          ".indexOn": ["sequence", "createdAt", "type"]
+        }
+      }
+    }
+  }
+}

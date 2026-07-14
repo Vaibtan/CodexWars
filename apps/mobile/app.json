@@ -24,6 +24,20 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      [
+        "@reactvision/react-viro",
+        {
+          "android": {
+            "xRMode": "AR"
+          },
+          "ios": {
+            "cameraUsagePermission": "CodexWars uses the camera to locate the shared arena and render opponents in augmented reality."
+          }
+        }
+      ],
+      "./plugins/withViroMonorepoPaths"
+    ]
   }
 }

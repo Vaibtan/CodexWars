@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { deleteApp, getApps } from "firebase-admin/app";
-import { getFirebaseApp, getFirestoreDb } from "../src/firebase.js";
+import { getFirebaseApp, getFirebaseAuth, getFirestoreDb } from "../src/firebase.js";
 
 const originalProjectId = process.env.FIREBASE_PROJECT_ID;
 const originalGoogleCloudProject = process.env.GOOGLE_CLOUD_PROJECT;
@@ -28,11 +28,14 @@ describe("Firebase Admin initialization", () => {
 
     const firstApp = getFirebaseApp();
     const secondApp = getFirebaseApp();
+    const firstAuth = getFirebaseAuth();
+    const secondAuth = getFirebaseAuth();
     const firstFirestore = getFirestoreDb();
     const secondFirestore = getFirestoreDb();
 
     expect(firstApp.options.projectId).toBe("codexwars-test");
     expect(secondApp).toBe(firstApp);
+    expect(secondAuth).toBe(firstAuth);
     expect(secondFirestore).toBe(firstFirestore);
   });
 });
