@@ -6,12 +6,15 @@ export type PlayerId = string;
 export type RoundId = number;
 export type CommandId = string;
 export type EventSequence = number;
-export type CharacterId = "default";
-export type WeaponId = "bolt";
+export type CharacterId = "default" | "knight" | "ninja" | "wizard";
+export type CharacterColorId = "gold" | "coral" | "aqua" | "violet";
+export type WeaponId = "bolt" | "fireball";
 
 export type RoomPhase =
   | "lobby"
   | "quiz"
+  | "quiz-results"
+  | "arena-setup"
   | "localization"
   | "positioning"
   | "countdown"

@@ -1,0 +1,16 @@
+export const colors = {
+  background: "#09090D",
+  backgroundRaised: "#17161E",
+  surface: "#0E0D13",
+  surfaceStrong: "#211834",
+  ink: "#FBFAFF",
+  inkMuted: "#C4BECC",
+  inkSubtle: "#A7A3B1",
+  accent: "#9561FF",
+  accentInk: "#FFFFFF",
+  success: "#48E5E8",
+  danger: "#FF7786",
+  fire: "#FF8A4C",
+  outline: "rgba(255, 255, 255, 0.12)",
+  cameraScrim: "rgba(9, 9, 13, 0.82)",
+} as const;

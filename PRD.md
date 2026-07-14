@@ -73,7 +73,7 @@ These decisions were made after researching the July 2026 AR landscape and the h
 - Public matchmaking or play between people not in the same room
 
 ### Additional hackathon non-goals
-- Accounts/auth, persistence, organizer-authored quizzes, teams, tournaments, anti-cheat beyond server authority
+- Named participant accounts, persistent battle state, organizer-authored quizzes, teams, tournaments, anti-cheat beyond server authority
 
 ---
 
@@ -256,7 +256,7 @@ Each client establishes the shared arena origin by recognizing the floor marker.
 ### Privacy (D7)
 - No camera frames ever leave the device; no facial recognition; camera purpose explained at permission time.
 - Nickname-only participants, no student accounts, no third-party ads/analytics SDKs, data minimization throughout.
-- Room and nickname state is in-memory only and deleted on room expiry; operational logs redact nicknames and use a short retention period; reconnect tokens are random and short-lived.
+- Room, combat, and nickname state is in-memory and deleted on room expiry. Firestore durably stores server-written quiz templates, answer submissions, and results; it never receives camera data or combat events, and mobile clients may read only their own completed result. Operational logs redact nicknames and use a short retention period; reconnect tokens are random and short-lived.
 
 ### Accessibility
 - Target lock never communicated by color alone; hits paired with sound/haptics; high-contrast panels and scrims over camera backgrounds; organizer can include someone in the quiz but exclude them from combat.
