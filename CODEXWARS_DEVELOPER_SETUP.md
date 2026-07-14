@@ -1,6 +1,6 @@
 # CodexWars — Retired v1 Developer Setup
 
-> **Do not use this setup guide.** It configures the retired Cloud Anchor/Cloud Run approach. Use `BUILD_SPEC.md` v1.2 for the active marker-based build, including the required Android-and-iOS P0 device setup.
+> **Do not use this setup guide.** It configures the retired Cloud Anchor/Cloud Run approach. Use `BUILD_SPEC.md` v1.3 for the active marker-based build, including the required Android-and-iOS P0 device setup.
 
 This is the day-before setup guide for the four-person CodexWars hackathon team.
 

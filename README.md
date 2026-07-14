@@ -28,7 +28,7 @@ packages/
 
 ## First run
 
-Use Node 22.13 or newer (Expo SDK 57 requires Node 22.13+), then install from
+Use Node 22.23.1 (pinned in `.nvmrc` and the EAS profiles), then install from
 the repository root:
 
 ```bash

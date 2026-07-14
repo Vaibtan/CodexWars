@@ -35,6 +35,8 @@ Therefore, a GLB is never a source of gameplay truth. It is a local visual repre
 
 Viro is native code. The mobile app must run in an installed Expo development build or production build; it cannot run inside Expo Go. Any native dependency or Viro config-plugin change requires rebuilding Android and creating a new iOS EAS development/TestFlight build.
 
+The checked-in baseline is Expo 57.0.4 / React Native 0.86.0. Viro's declared peer range includes this pair, but only a successful M0 development build on both physical platforms proves it for CodexWars.
+
 ## 3. Game-aligned behavior
 
 ### 3.1 Character selection lifecycle
@@ -224,10 +226,10 @@ Do not permit arbitrary user-uploaded GLBs in the hackathon/product P1 path. The
 2. Register the bundled floor-marker image at its true physical width (A4: `0.297 m`) through the Viro tracking-target API.
 3. Render `ViroARImageMarker` for the arena target.
 4. On acquisition, record `T_marker`: the marker pose in this device's private AR world.
-5. Publish `ArSessionState = localized` and report it to the server through the existing `localization_changed` pathway.
-6. Convert local camera pose/forward vector to marker space at approximately 10 Hz; publish only plain `ArPose` data to `battleStore`.
+5. Publish `ArSessionState = localized` and report the coarse state to the server through `localization_changed`.
+6. Convert local camera pose/forward vector to marker space at approximately 10 Hz; publish plain `ArPose` data with `observedAt` and `quality: tracked | inertial` to `battleStore`.
 7. Render each synchronized opponent under the marker node using their marker-relative X/Z coordinates.
-8. On tracking loss, retain the last valid transform for local presentation, publish `lost`, show the PRD-mandated re-scan guidance, and do not pause the shared P0 match.
+8. When the marker leaves view but world tracking still supplies fresh inertial poses, publish local `degraded` quality and continue with a warning. If no pose is available or it is older than `AIM.POSE_STALE_MS`, publish `lost`, disable firing locally, retain only the locked server position/last transform for presentation, show re-scan guidance, and do not pause the shared P0 match. Never emit an attack from a frozen last-known aim.
 
 ### 7.2 Coordinate rules
 
@@ -300,6 +302,7 @@ Required tests:
 
 - Unit-test catalog ID validation and fallback behavior.
 - Unit-test coordinate conversions independently of Viro.
+- Unit-test pose freshness so tracked/inertial poses may fire and stale/unavailable poses may not.
 - Server integration-test phase gates and rejection of invalid `select_character` IDs.
 - Regression-test combat with different `characterId` values and prove identical damage/winner outcomes.
 - Device-test marker reacquisition, GLB asset loading, animation playback, 3–4 real devices, then 12 simulated/real render load as available.

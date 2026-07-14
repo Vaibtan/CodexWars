@@ -1,6 +1,6 @@
 # CodexWars — P0 Implementation Plan
 
-**Status:** Execution plan — Firebase Admin scaffold exists; P0 feature implementation has not started
+**Status:** Execution plan — Expo/mobile, shared-package, health-server, and deferred Firebase scaffolds exist; P0 feature implementation has not started
 **Last updated:** 2026-07-14  
 **Sources of truth:** [`PRD.md`](../PRD.md), [`BUILD_SPEC.md`](../BUILD_SPEC.md), [`ARCHITECTURE.md`](../ARCHITECTURE.md), and [`AR_IMPLEMENTATION_SPEC.md`](AR_IMPLEMENTATION_SPEC.md)
 
@@ -17,6 +17,9 @@ This plan preserves the current product architecture while incorporating the req
 5. **The P0 quiz is locked.** `programming-fundamentals-v1` has ten questions: seven 30-second basic/intermediate questions, three 45-second difficult questions, and a five-second automatic reveal. Shield rewards are 0/10/20/30/40 for score bands 0–2/3–4/5–6/7–8/9–10.
 6. **P0 AR renders one bundled default GLB avatar.** M0 uses only diagnostic primitives; after M0 go/conditional-go, P0 renders the default GLB. P1 adds three selectable bundled GLB cosmetics and palette choice. GLBs never define hitboxes or combat logic.
 7. **Area scan means marker acquisition, not room meshing.** The client guides the user to scan the printed asymmetric A4 marker and nearby visual features until it obtains `T_marker`; it does not reconstruct the room or detect people.
+8. **The checked-in mobile baseline is Expo 57 / React Native 0.86.** Normalize Node and TypeScript across workspaces and replace dependency ranges with exact pins before the first Viro native build; do not downgrade the scaffold silently.
+9. **The P0 organizer is a non-combat server-owned role.** The organizer is outside the 12-participant capacity/start invariant. Quiz-only participants remain inside participant capacity but outside combat readiness.
+10. **Create/join precede room messages.** Use Colyseus matchmaking create/join-by-ID; the custom four-digit `roomId` is the public code. Do not model `create_room` or `join_room` as commands sent after connection.
 
 ## 2. Dependency graph and execution order
 
@@ -105,7 +108,7 @@ This is intentionally the first implementation task.
 
 ### Deliverables
 
-1. Create `apps/mobile` with Expo SDK 56, TypeScript strict mode, React Navigation, and a single `HomeScreen` that renders **“CodexWars — Hello World”**.
+1. Continue from the checked-in Expo SDK 57 / React Native 0.86 scaffold, normalize the workspace to Node 22.23.1 and TypeScript 6.0.3 strict mode, pin the proven React type package (`@types/react` 19.2.17), add React Navigation, and keep the initial `HomeScreen` as the non-AR smoke test.
 2. Add a minimal app shell with a status line showing build platform and app version.
 3. Configure the Viro Expo plugin but do not mount an AR scene yet.
 4. Build and install:
@@ -129,19 +132,21 @@ Firebase is intentionally absent from this phase. The existing Admin bootstrap r
 Create `packages/shared` before the server or screens grow:
 
 - `RoomPhase = lobby | quiz | localization | positioning | countdown | battle | results`.
-- `PlayerState` with nickname, role, `combatIncluded`, `quizCompleted`, `quizScore`, shield/HP, position, ready, connected, and eliminated fields.
+- A separate server-owned organizer member plus `PlayerState` for participants with nickname, `combatIncluded`, `quizCompleted`, `quizScore`, shield/HP, position, ready, connected, and eliminated fields.
 - `QuizState` with `templateId`, a public current-question snapshot, `questionIndex`, `questionEndsAt`, `revealEndsAt`, `status`, and public score/reward summaries after completion.
 - Server-private answer keys only; never sync correct answers before expiry.
-- Constants for capacity (12), countdown (5 s), battle (60 s), reconnect grace (20 s), question/reveal durations, shield rewards, and all combat values.
+- Constants for participant capacity (12), spacing (1.5 m), marker exclusion radius (0.75 m), countdown (5 s), battle (60 s), participant reconnect grace (20 s), organizer grace (60 s), pose staleness (1 s), question/reveal durations, shield rewards, and all combat values.
 
 ### 6.2 Colyseus room foundation
 
 Implement `WarRoom` and a mobile `warRoomClient` wrapper using the pinned `@colyseus/sdk`.
 
-- Four-digit code allocation; no active collisions; two-hour idle expiry.
-- `create_room`, `join_room`, duplicate nickname suffixing, capacity rejection, `set_combat_included`, and typed errors.
+- Matchmaker create flow assigns a unique four-digit custom `roomId` through Colyseus Presence; join-by-ID consumes the room reservation before normal messages. Release the identifier on dispose and enforce two-hour idle expiry.
+- `onCreate` assigns the non-combat organizer role; `onJoin` creates participants, suffixes duplicate nicknames, and rejects participant 13. Quiz-only participants still consume participant capacity.
+- Every command follows phase → role/authority → payload → gameplay invariant → mutation → broadcast. Include `set_combat_included` and structured typed errors.
 - State synchronization for public room/player state and `serverNow`/`startsAt` time offset.
 - `onDrop` → `allowReconnection` → `onReconnect` lifecycle. Disable controls while disconnected and discard queued attack commands on reconnect.
+- Before countdown, an organizer drop freezes only organizer-driven progression for 60 seconds; expiry closes the room. Countdown/battle timers continue after they have started.
 - Lobby UI: create/join form, code display, live roster, connection state, quiz-only toggle, and organizer-only phase controls.
 
 ### Acceptance criteria
@@ -252,10 +257,10 @@ Implement the `ArSessionState` / `ArPose` contract from `ARCHITECTURE.md`:
 
 - Organizer sets circular arena radius (3–6 m).
 - Combat-included player scans the marker, walks to a stationary spot, and presses **Lock My Position**.
-- Client sends marker-relative X/Z once; server validates radius and 1.2 m spacing against locked combat participants.
-- On rejection, return directional guidance and keep the player unlocked.
+- Client sends marker-relative X/Z once; server validates the outer radius, 0.75 m marker exclusion zone, and 1.5 m spacing against locked combat participants.
+- On rejection, return structured `{ correction: { x, z }, distanceM }` guidance and keep the player unlocked.
 - Organizer minimap is ordinary React Native 2D UI, rendered from synchronized server positions—not an AR scene.
-- Loss before countdown clears ready. Loss in P0 battle keeps the last transform and shows re-scan guidance without globally pausing.
+- Loss before countdown clears ready. During P0 battle, the locked server position survives and a fresh timestamped inertial pose may continue; if the pose is older than one second or unavailable, disable firing and show re-scan guidance without globally pausing.
 
 ### Exit
 
@@ -274,10 +279,10 @@ One Android and one iPhone can localize, lock distinct valid positions, see each
 
 1. Organizer presses Start Battle only after each combat-included player is connected, localized, quiz-complete, positioned, and ready.
 2. Server emits `startsAt = serverNow + 5 s`; clients render the same countdown from their calculated server-time offset.
-3. Fire button projects the camera forward vector onto X/Z, discards vertical pitch, and sends `attack { weapon, dirX, dirZ, predictedTargetId? }`. Looking above/below a model's head has no effect when that floor-plane direction is unchanged. If the horizontal projection is below `AIM.MIN_HORIZONTAL_MAGNITUDE`, fire is disabled with an "aim level" cue instead of falling back to a 3D ray.
-4. Server validates phase, start time, aliveness, cooldown, normalized direction, and then resolves nearest ray-vs-circle hit at server receipt time. GLB vertices, height, bounds, and bones are ignored.
-5. Server applies shield before HP, broadcasts `attack_resolved`, and updates synchronized state.
-6. Clients play persistent hit/elimination effects only from the authoritative event/state. A predicted miss or hit may never change HP locally.
+3. Fire button requires a fresh pose, projects the camera forward vector onto X/Z, discards vertical pitch, and sends `attack { roundId, commandId, weapon, dirX, dirZ, predictedTargetId? }`. Looking above/below a model's head has no effect when that floor-plane direction is unchanged. If the horizontal projection is below `AIM.MIN_HORIZONTAL_MAGNITUDE`, fire is disabled with an "aim level" cue instead of falling back to a 3D ray.
+4. Server validates role, `roundId`, unseen `commandId`, phase, start time, aliveness, cooldown, and normalized direction, then resolves nearest ray-vs-circle hit at server receipt time. GLB vertices, height, bounds, and bones are ignored.
+5. Server applies shield before HP, increments the per-round `eventSequence`, broadcasts `attack_resolved`, and updates synchronized state.
+6. Clients reject stale-round/duplicate-sequence events and play persistent hit/elimination effects only from the authoritative event/state. A predicted miss or hit may never change HP locally.
 
 ### 10.3 Defeat and winner animation
 
@@ -285,12 +290,12 @@ One Android and one iPhone can localize, lock distinct valid positions, see each
 - The defeated phone shows the P0 non-interactive eliminated overlay with live standings. It remains connected and sees the final result.
 - Other phones render a short GLB fade/flash at the eliminated player’s locked position.
 - When one player remains or the 60-second server timer ends, the server applies the highest-HP then quiz-score tie-break, broadcasts `battle_completed`, and freezes battle controls.
-- Results screen plays one bounded winner animation: camera HUD confetti/flash, winner nickname, final standings, and **Run Another Round** for organizer reset. The animation is presentation only; no new gameplay messages are emitted.
+- Results screen plays one bounded winner animation: camera HUD confetti/flash, winner nickname, final standings, and **Run Another Round** for organizer reset. Reset increments `roundId`, retains connected identities/nicknames/roles only, and clears quiz/localization/position/readiness/combat state. The animation is presentation only; no gameplay messages are emitted by it.
 
 ### Tests and rehearsal
 
 - Pure unit tests: geometry, hit priority, shield overflow, cooldowns, timer winner, quiz-score tie-break.
-- Server integration tests: start invariant, battle rejection paths, two aligned targets, elimination, results once-only, disconnect timeout.
+- Server integration tests: matchmaking bootstrap, organizer authorization/drop policy, participant capacity, structured position errors, start invariant, stale-round/duplicate-command rejection, ordered events, two aligned targets, elimination, results once-only, and disconnect timeout.
 - Device rehearsal: two then three/four mixed-platform phones; marker loss mid-battle; reconnect; forced zero HP; timer tie; two complete demonstrations in succession.
 
 ## 11. Parallel work lanes after the foundation

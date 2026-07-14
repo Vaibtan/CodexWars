@@ -1,7 +1,7 @@
 # CodexWars — Architecture Design
 
-**Version:** 1.0
-**Companions:** `PRD.md` v2 (what & why) · `BUILD_SPEC.md` v1 (stack, repo layout, build order)
+**Version:** 1.1
+**Companions:** `PRD.md` v2.3 (what & why) · `BUILD_SPEC.md` v1.3 (stack, repo layout, build order)
 **This document:** the structural and runtime design — components, deployment, critical sequences, state machines, and invariants. Diagrams here are the reference during implementation; if code and this doc disagree, fix one of them in the same commit.
 
 ---
@@ -13,7 +13,7 @@ Three layers, one hard rule per boundary:
 | Layer | Owns | Hard rule |
 |---|---|---|
 | **AR presentation** (`mobile/src/ar/`) | Marker tracking, coordinate conversion, rendering bundled GLBs/effects in camera space | Only place Viro is imported. Publishes plain 2D data; never touches the network. |
-| **Game client** (`mobile/src/{screens,store,net}`) | UI, local state, Colyseus connection | Never imports Viro types. Treats AR as a sensor behind the `ArSessionState`/`ArPose` contract. |
+| **Game client** (`mobile/src/{features,screens,store,lib}`) | UI, local state, Colyseus connection | Never imports Viro types. Treats AR as a sensor behind the `ArSessionState`/`ArPose` contract; only `lib/warRoomClient.ts` imports `@colyseus/sdk`. |
 | **Authoritative server** (`server/`) | Rooms, phase machine, validation, combat, results | Never knows AR exists. Consumes marker-relative 2D coordinates as opaque numbers. |
 
 All three compile against `packages/shared` (types, protocol, constants, pure game math). The math is written once and executed in two places: the server uses it authoritatively; the client uses the same functions for prediction (crosshair target highlight), which is why predicted and actual results almost always agree.
@@ -28,7 +28,7 @@ All three compile against `packages/shared` (types, protocol, constants, pure ga
 flowchart TB
     subgraph HOTSPOT["Phone hotspot or laptop hotspot (LAN, no internet needed)"]
         subgraph LAPTOP["Windows laptop"]
-            SRV["Colyseus server (Node 22)<br/>in-memory state only"]
+            SRV["Colyseus server (Node 22.23.1)<br/>in-memory state only"]
         end
         P1["Organizer phone<br/>(Android or iOS dev build)"]
         P2["Participant phone 1<br/>(Android or iOS)"]
@@ -46,7 +46,7 @@ flowchart TB
 Properties: no cloud services, no internet, one Wi-Fi hop between every phone and the server. The marker is the only "shared infrastructure" and it's a piece of paper.
 
 ### Product topology (M3+)
-Identical, except the Colyseus server moves to a small VPS/PaaS node and phones reach it over the internet. Nothing in the code changes but the URL — this is deliberate (BUILD_SPEC §11).
+A single-node hosted pilot preserves the `WarRoom` and protocol interfaces, but deployment is not a URL-only change: it adds TLS/WSS termination, WebSocket-aware ingress, health checks, process supervision, observability, abuse throttling, and client/server compatibility policy. Horizontal scale adds shared Colyseus Presence/Driver, room placement, and durable product storage outside live room state. M3 begins with a dedicated hosted-architecture review.
 
 ---
 
@@ -63,13 +63,13 @@ flowchart TB
             SCREENS["screens/ (~10, thin)"]
             SSTORE["store/sessionStore<br/>room mirror, phase, players"]
             BSTORE["store/battleStore<br/>10Hz aim, predicted target, effect queue"]
-            NET["net/ (@colyseus/sdk wrapper)<br/>connect · state-sync · messages · reconnect"]
+            NET["lib/warRoomClient<br/>@colyseus/sdk adapter<br/>matchmake · sync · messages · reconnect"]
             HUD["components/<br/>crosshair, HP bars, fire buttons"]
         end
     end
 
     subgraph SERVER["apps/server"]
-        CODES["codes.ts<br/>4-digit code registry"]
+        CODES["roomId.ts<br/>unique 4-digit roomId allocation"]
         ROOM["WarRoom.ts<br/>lifecycle · phase machine · validation"]
         SCHEMA["schema/<br/>Colyseus synced state"]
         QUIZ["quiz.ts"]
@@ -99,15 +99,40 @@ Dependency direction is strictly downward into `shared`; `shared` imports nothin
 
 ---
 
-## 4. Runtime sequences (the four that matter)
+## 4. Runtime sequences (the five that matter)
 
-### 4.1 Localization and position lock
+### 4.1 Room creation and join bootstrap
+
+Room creation/joining happens through Colyseus matchmaking before any in-room command can exist. The four-digit public code is the custom `roomId`, so there is no second code registry to keep consistent.
+
+```mermaid
+sequenceDiagram
+    participant ORG as Organizer app
+    participant MM as Colyseus matchmaker
+    participant ROOM as WarRoom
+    participant P as Participant app
+
+    ORG->>MM: create room type "war" {organizerName}
+    MM->>ROOM: construct + onCreate
+    ROOM->>ROOM: allocate unique 4-digit roomId through Presence
+    ROOM->>ROOM: bind creating client to organizer role
+    MM-->>ORG: connected room + roomId + reconnectionToken
+    ORG-->>ORG: display roomId as public code
+    P->>MM: joinById(code) {displayName}
+    MM->>ROOM: reserve/consume seat + onJoin
+    ROOM->>ROOM: validate capacity; create participant record
+    ROOM-->>P: connected room + initial state + reconnectionToken
+```
+
+Organizer/participant roles come only from this server-owned lifecycle. A client cannot promote itself with an in-room payload.
+
+### 4.2 Localization and position lock
 
 ```mermaid
 sequenceDiagram
     participant V as ar/ArenaSession (Viro)
     participant S as stores
-    participant N as net/
+    participant N as warRoomClient adapter
     participant SRV as WarRoom
 
     Note over V: participant on Marker-scan screen
@@ -120,22 +145,22 @@ sequenceDiagram
     V->>S: ArPose {position} (camera pose in marker space)
     S->>N: lock_position {x, z}
     N->>SRV: forward
-    SRV->>SRV: validate: combatIncluded? inside radius? ≥ MIN_SPACING from all locked combat players?
+    SRV->>SRV: validate: combatIncluded? outside marker exclusion?<br/>inside radius? ≥ MIN_SPACING from locked combat players?
     alt valid
         SRV-->>N: state sync: player.position set
     else invalid
-        SRV-->>N: error {POSITION_OUT_OF_BOUNDS | SPACING_VIOLATION}
+        SRV-->>N: error {code, details: correction vector + distance}
         N-->>S: show directional guidance, stay unlocked
     end
 ```
 
-### 4.2 Attack resolution (the core loop)
+### 4.3 Attack resolution (the core loop)
 
 ```mermaid
 sequenceDiagram
     participant HUD as HUD (fire button)
     participant B as battleStore
-    participant N as net/
+    participant N as warRoomClient adapter
     participant SRV as WarRoom
     participant ALL as all clients
 
@@ -143,12 +168,12 @@ sequenceDiagram
     HUD->>B: fire pressed
     B->>B: read latest aimDir; run shared resolveAttack for prediction
     Note over B: project camera forward onto X/Z; discard vertical pitch
-    B->>N: attack {weapon, dirX, dirZ, predictedTargetId}
+    B->>N: attack {roundId, commandId, weapon, dirX, dirZ, predictedTargetId}
     N->>SRV: forward
-    SRV->>SRV: validate at server receipt: phase=battle, now≥startsAt,<br/>alive, cooldown elapsed, charges>0, |dir|≈1
+    SRV->>SRV: validate at server receipt: role/round/unseen command,<br/>phase=battle, now≥startsAt, alive, cooldown, charges, |dir|≈1
     SRV->>SRV: resolveAttack(attacker, dir, weapon, players)  ← shared/combat.ts
     SRV->>SRV: applyDamage: shield → HP → clamp → eliminated?
-    SRV->>ALL: attack_resolved {attackerId, targetId|null, damage, targetShield, targetHp}
+    SRV->>ALL: attack_resolved {roundId, eventSequence, commandId,<br/>attackerId, targetId|null, damage, targetShield, targetHp}
     opt target reached 0 HP
         SRV->>ALL: player_eliminated {playerId}
         SRV->>SRV: checkWinner → maybe battle_completed
@@ -158,7 +183,7 @@ sequenceDiagram
 
 Latency budget: one client→server hop + broadcast on LAN ≈ 5–30 ms; the ≤250 ms responsiveness target (PRD §9) has an order-of-magnitude margin on the demo topology.
 
-### 4.3 Battle start (synchronized countdown)
+### 4.4 Battle start (synchronized countdown)
 
 ```mermaid
 sequenceDiagram
@@ -180,7 +205,7 @@ sequenceDiagram
 
 Clients never count down from a local "5"; they render `startsAt − (localNow + serverTimeOffset)`, so a phone that receives the sync late still agrees on the start instant.
 
-### 4.4 Disconnect and reconnect
+### 4.5 Disconnect and reconnect
 
 ```mermaid
 sequenceDiagram
@@ -204,6 +229,8 @@ sequenceDiagram
 
 Key property: **position, HP, and rewards live on the server**, so a phone reboot mid-session loses only the AR localization (recoverable by re-scanning the marker) — never the player's game state.
 
+Organizer drops follow a different policy: before countdown, the phase stays unchanged and organizer-only commands are unavailable for 60 seconds; grace expiry closes the in-memory room. Once countdown or battle has started, authoritative timers/combat continue and only organizer controls are unavailable until reconnection.
+
 ---
 
 ## 5. State machines
@@ -212,7 +239,7 @@ Key property: **position, HP, and rewards live on the server**, so a phone reboo
 
 ```mermaid
 stateDiagram-v2
-    [*] --> lobby: create_room
+    [*] --> lobby: matchmaker creates WarRoom
     lobby --> quiz: organizer advance_phase
     quiz --> localization: all combat-included players quizCompleted
     localization --> positioning: arena configured ∧ players localizing
@@ -223,7 +250,7 @@ stateDiagram-v2
     results --> [*]: room expiry
 ```
 
-Every inbound message is gated on phase (BUILD_SPEC §8.2); anything else is a typed `error`, never a state change.
+Every inbound command is gated in this order: phase → role/authority → payload → gameplay invariant → mutation → sync/broadcast (BUILD_SPEC §8.2). Anything invalid is a typed `error`, never a state change.
 
 ### 5.2 AR session (client-owned, per phone)
 
@@ -232,13 +259,18 @@ stateDiagram-v2
     [*] --> initializing: AR screen mounts
     initializing --> searching: Viro session ready
     searching --> localized: marker acquired (T_marker captured)
-    localized --> tracking_lost: tracking degrades / marker no longer tracked
+    localized --> degraded: marker not visible, fresh inertial pose continues
+    degraded --> localized: marker reacquired
+    degraded --> tracking_lost: pose becomes stale/unavailable
+    localized --> tracking_lost: world tracking fails
     tracking_lost --> searching: user taps re-scan
-    tracking_lost --> localized: tracking recovers inertially
+    tracking_lost --> localized: marker/world tracking recovers
     localized --> [*]: AR screen unmounts (camera off — thermal rule)
+    degraded --> [*]: AR screen unmounts
+    tracking_lost --> [*]: AR screen unmounts
 ```
 
-Only transitions in/out of `localized` are reported to the server. Before countdown, loss clears readiness. During P0 battle, the client keeps the last valid transform, shows a re-scan prompt, and does not pause the shared match; organizer-controlled pause is P1.
+The server receives only coarse `searching` / `localized` / `lost` state. The AR module separately owns pose quality and freshness. Before countdown, `lost` clears readiness. During P0 battle, `degraded` may keep firing while timestamped inertial poses remain fresh; `tracking_lost` retains the locked server position but disables firing locally, shows a re-scan prompt, and does not pause the shared match. A frozen last-known aim is never sent.
 
 ### 5.3 Player lifecycle (server-owned, per participant)
 
@@ -263,10 +295,10 @@ Y is discarded at the `ar/` boundary. There is no coordinate translation on the 
 
 | Data | Written by | Read by |
 |---|---|---|
-| Phase, `startsAt`, `serverNow`, combat inclusion, positions, HP/shield/charges, eliminations, winner | **Server only** | all clients via state sync |
+| Role, phase, `roundId`, `eventSequence`, `startsAt`, `serverNow`, combat inclusion, positions, HP/shield/charges, eliminations, winner | **Server only** | all clients via state sync |
 | Localization status, ready flag, quiz answers, attack commands | Owning client (as *requests*) | server validates, then owns the result |
 | Combat inclusion | Organizer (as a request) | server validates, then owns the result |
-| Live aim pose, predicted target, effect animations | Owning client only | never networked (aim ships only inside discrete `attack` messages) |
+| Timestamped live aim pose, pose quality/freshness, predicted target, effect animations | Owning client only | never continuously networked (fresh aim ships only inside discrete `attack` messages) |
 
 This is why bandwidth stays trivial: continuous data (aim at 10 Hz) never crosses the network; only button presses and server verdicts do.
 
@@ -280,18 +312,21 @@ Checked in code review and, where possible, by tests:
 2. **I-2** No import of anything from `apps/` inside `packages/shared`; `shared` has zero runtime dependencies.
 3. **I-3** Every gameplay number lives in `shared/constants.ts` — no magic numbers in room or component code.
 4. **I-4** The server never reads `predictedTargetId` for resolution (diagnostics logging only).
-5. **I-5** Every client→server message handler: phase gate → payload validation → state mutation → sync/broadcast, in that order.
+5. **I-5** Every client→server command handler: phase gate → role/authority check → payload validation → gameplay invariant validation → state mutation → sync/broadcast, in that order.
 6. **I-6** All state mutations happen on the server inside `WarRoom`; clients render synced state and local prediction, never locally-mutated authority.
 7. **I-7** AR camera is active only on marker-scan, position-lock, and battle screens (thermal budget, PRD D4).
 8. **I-8** P0 start gating applies only to `combatIncluded` players; a quiz-only player has no position and cannot block battle start.
 9. **I-9** P0 attack resolution uses server receipt time; client clocks never decide combat order.
+10. **I-10** The organizer is non-combat in P0, does not consume participant capacity, and organizer commands require the server-bound role.
+11. **I-11** Every combat command/result carries `roundId`; commands are deduplicated by `commandId`, and clients apply authoritative events once in `eventSequence` order.
+12. **I-12** No attack is emitted from a pose older than `AIM.POSE_STALE_MS`; the locked server position may survive tracking loss, but a frozen aim may not.
 
 ---
 
 ## 8. Extension seams (how M2+/product features attach without surgery)
 
 - **Minimap fallback mode (P1):** a second implementation of the `ArPose` producer — positions from organizer assignment and aim from gyro heading — plus explicit `playMode`, assignment, calibration, and readiness fields in the protocol/server state. The battle screen swaps the camera view for a top-down canvas; combat resolution remains unchanged.
-- **Big-screen spectator view (P2):** a new read-only Colyseus client (web page on the laptop/projector) consuming the same state sync; zero server changes beyond a `spectator` join option.
+- **Big-screen spectator view (P2):** a new read-only Colyseus client (web page on the laptop/projector) consuming the same state sync; the server adds an explicitly authorized `spectator` join path but combat/room rules remain unchanged.
 - **Loadout economy (P2):** replaces `rewards.ts` mapping + adds a shop screen between quiz and localization; combat layer unchanged.
 - **Teams/tournaments (P2):** additional fields on `PlayerState`/`RoomState` + winner logic variants in `combat.ts`; the phase machine gains no new states until tournaments (which compose rooms rather than complicate one).
 - **Unity/native AR rewrite (contingency):** replaces `apps/mobile` only; protocol and server are engine-agnostic by construction.
