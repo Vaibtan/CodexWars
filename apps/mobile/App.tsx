@@ -10,6 +10,7 @@ import { createWarRoom, joinWarRoom, selectCharacter } from "./src/lib/firebase/
 import { CharacterCustomizationScreen } from "./src/screens/CharacterCustomizationScreen";
 import { BattleResultsScreen } from "./src/screens/BattleResultsScreen";
 import { ArCharacterTestScreen } from "./src/screens/ArCharacterTestScreen";
+import { DemoStoryScreen } from "./src/screens/DemoStoryScreen";
 import { HomeScreen } from "./src/screens/HomeScreen";
 import { OrganizerDashboardScreen } from "./src/screens/OrganizerDashboardScreen";
 import { ParticipantBattleScreen } from "./src/screens/ParticipantBattleScreen";
@@ -21,6 +22,7 @@ import { QuizWaitingScreen } from "./src/screens/QuizWaitingScreen";
 
 type AppScreen =
   | "home"
+  | "demo-story"
   | "ar-character-test"
   | "organizer-dashboard"
   | "quiz-waiting"
@@ -120,9 +122,11 @@ export default function App() {
           error={connectionError}
           onCreateRoom={handleCreateRoom}
           onJoinRoom={handleJoinRoom}
+          onShowDemo={() => setScreen("demo-story")}
           onTestAr={() => setScreen("ar-character-test")}
         />
       )}
+      {screen === "demo-story" && <DemoStoryScreen onDone={() => setScreen("home")} />}
       {screen === "ar-character-test" && <ArCharacterTestScreen onDone={() => setScreen("home")} />}
       {screen === "organizer-dashboard" && session && warRoom.room && (
         <OrganizerDashboardScreen connected={warRoom.connected} onLeave={leaveRoom} room={warRoom.room} session={session} />
