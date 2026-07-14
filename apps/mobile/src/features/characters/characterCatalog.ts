@@ -20,7 +20,7 @@ export const characterCatalog: readonly CharacterDefinition[] = [
       aqua: require("../../../../../assets/characters/runtime/knight-aqua.glb"),
       violet: require("../../../../../assets/characters/runtime/knight-violet.glb"),
     },
-    scale: [0.72, 0.72, 0.72],
+    scale: [0.36, 0.36, 0.36],
   },
   {
     id: "ninja",

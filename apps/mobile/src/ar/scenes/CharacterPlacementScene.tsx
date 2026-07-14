@@ -5,6 +5,7 @@ import {
   ViroARPlane,
   ViroARScene,
   ViroMaterials,
+  ViroNode,
   ViroQuad,
   ViroSphere,
   ViroText,
@@ -15,6 +16,7 @@ import { getSceneBridge, mapViroTrackingState, type ArSceneProps } from "./scene
 
 ViroMaterials.createMaterials({
   placementRing: { diffuseColor: "#FFFFFF", lightingModel: "Constant" },
+  previewGlow: { diffuseColor: "#5DE2D7", lightingModel: "Constant" },
 });
 
 type ViroPosition = [number, number, number];
@@ -40,15 +42,42 @@ export function CharacterPlacementScene(props: ArSceneProps = {}) {
       onTrackingUpdated={(state) => bridge?.onTrackingChanged(mapViroTrackingState(state))}
     >
       <ViroAmbientLight color="#FFFFFF" intensity={220} />
-      <ViroARPlane alignment="Horizontal" minHeight={0.5} minWidth={0.5} onClick={placeCharacter}>
-        <ViroQuad
-          height={4}
-          materials={["placementRing"]}
-          opacity={0.01}
-          position={[0, 0.004, 0]}
-          rotation={[-90, 0, 0]}
-          width={4}
-        />
+      {!placement && character && selection ? (
+        <ViroNode position={[0, -0.55, -2]}>
+          <ViroSphere
+            materials={["previewGlow"]}
+            opacity={0.5}
+            radius={0.52}
+            scale={[1, 0.035, 1]}
+            widthSegmentCount={24}
+          />
+          <Viro3DObject
+            opacity={0.78}
+            position={[0, 0.03, 0]}
+            scale={[...character.scale]}
+            source={getCharacterSource(selection.characterId, selection.colorId)}
+            type="GLB"
+          />
+          <ViroText
+            position={[0, 1.55, 0]}
+            style={{ color: "#5DE2D7", fontSize: 24, fontWeight: "700", textAlign: "center" }}
+            text="TAP A FLOOR TO PLACE"
+            transformBehaviors={["billboardY"]}
+            width={2}
+          />
+        </ViroNode>
+      ) : null}
+      <ViroARPlane alignment="Horizontal" minHeight={0.5} minWidth={0.5}>
+        <ViroNode onClick={placeCharacter}>
+          <ViroQuad
+            height={4}
+            materials={[placement ? "placementRing" : "previewGlow"]}
+            opacity={placement ? 0.01 : 0.08}
+            position={[0, 0.004, 0]}
+            rotation={[-90, 0, 0]}
+            width={4}
+          />
+        </ViroNode>
       </ViroARPlane>
       {placement && character && selection ? (
         <>
@@ -61,7 +90,6 @@ export function CharacterPlacementScene(props: ArSceneProps = {}) {
             widthSegmentCount={24}
           />
           <Viro3DObject
-            animation={{ loop: true, name: "Idle", run: true }}
             position={[placement[0], placement[1] + 0.02, placement[2]]}
             scale={[...character.scale]}
             source={getCharacterSource(selection.characterId, selection.colorId)}

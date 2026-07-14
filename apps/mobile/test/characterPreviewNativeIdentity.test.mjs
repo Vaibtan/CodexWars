@@ -52,5 +52,6 @@ test("AR placement does not pass the incompatible onClick prop to ViroQuad", asy
   const quad = source.match(/<ViroQuad[\s\S]*?\/>/)?.[0] ?? "";
 
   assert.doesNotMatch(quad, /onClick=/);
-  assert.match(source, /<ViroARPlane[^>]*onClick=\{placeCharacter\}/);
+  assert.doesNotMatch(quad, /onClickState=/);
+  assert.match(source, /<ViroNode onClick=\{placeCharacter\}>/);
 });
