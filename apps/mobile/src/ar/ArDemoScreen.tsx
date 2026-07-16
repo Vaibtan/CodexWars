@@ -2,42 +2,44 @@ import { useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { ViroARSceneNavigator } from "@reactvision/react-viro";
-import type { WarRoomState } from "@codexwars/shared";
+import type { PublicRoomState } from "@codexwars/shared";
 import { colors } from "../components/theme";
 import { getCharacter, getCharacterColor } from "../features/characters/characterCatalog";
-import type { WarRoomSession } from "../features/warRoom/types";
-import { endBattle, setArenaReady, startBattle } from "../lib/firebase/warRooms";
-import { FloorScanScene } from "./scenes/FloorScanScene";
-import type { ArFlowPhase, ArSceneBridge, ArTrackingState } from "./types";
+import type { WarRoomRealtimeClient } from "../features/warRoom/realtimeClient";
+import { SharedArenaScene } from "./scenes/SharedArenaScene";
+import type { ArFlowPhase, ArMarkerTrackingState, ArSceneBridge, ArTrackingState } from "./types";
 
 type ArDemoScreenProps = {
+  client: WarRoomRealtimeClient;
   onBattleComplete: () => void;
   onExit: () => void;
-  room: WarRoomState;
-  session: WarRoomSession;
+  room: PublicRoomState;
 };
 
 const trackingCopy: Record<ArTrackingState, string> = {
   initializing: "Starting camera…",
-  limited: "Move slowly and aim at a textured floor",
+  limited: "Move slowly and keep the printed marker visible",
   normal: "Tracking stable",
   unavailable: "Tracking unavailable",
 };
 
-export function ArDemoScreen({ onBattleComplete, onExit, room, session }: ArDemoScreenProps) {
-  const [phase, setPhase] = useState<ArFlowPhase>("floor-scan");
-  const [floorFound, setFloorFound] = useState(false);
+export function ArDemoScreen({ client, onBattleComplete, onExit, room }: ArDemoScreenProps) {
+  const [phase, setPhase] = useState<ArFlowPhase>("marker-scan");
+  const [markerTracking, setMarkerTracking] = useState<ArMarkerTrackingState>("searching");
   const [trackingState, setTrackingState] = useState<ArTrackingState>("initializing");
   const [syncError, setSyncError] = useState<string | null>(null);
-  const participants = Object.values(room.members);
-  const readyParticipants = participants.filter((participant) => participant.readiness === "waiting");
+  const participants = Object.values(room.players);
+  const readyParticipants = participants.filter((participant) => participant.ready && participant.positionLocked);
+  const markerFound = markerTracking === "tracked" || markerTracking === "degraded";
 
   const sceneBridge = useMemo<ArSceneBridge>(
     () => ({
-      onFloorFound: () => setFloorFound(true),
+      arenaRadiusM: room.arena.radiusM,
+      onMarkerTrackingChanged: setMarkerTracking,
       onTrackingChanged: setTrackingState,
+      phase: phase === "battle" ? "battle" : "marker-scan",
     }),
-    [],
+    [phase, room.arena.radiusM],
   );
 
   useEffect(() => {
@@ -46,12 +48,12 @@ export function ArDemoScreen({ onBattleComplete, onExit, room, session }: ArDemo
   }, [onBattleComplete, room.phase]);
 
   const openOrganizerLobby = async () => {
-    if (!floorFound) {
+    if (!markerFound) {
       return;
     }
     setSyncError(null);
     try {
-      await setArenaReady(session, room);
+      await client.send({ radiusM: room.arena.radiusM, type: "configure_arena" });
       setPhase("organizer-lobby");
     } catch (error) {
       setSyncError(error instanceof Error ? error.message : String(error));
@@ -64,7 +66,7 @@ export function ArDemoScreen({ onBattleComplete, onExit, room, session }: ArDemo
     }
     setSyncError(null);
     try {
-      await startBattle(session, room);
+      await client.send({ type: "start_battle" });
     } catch (error) {
       setSyncError(error instanceof Error ? error.message : String(error));
     }
@@ -73,7 +75,8 @@ export function ArDemoScreen({ onBattleComplete, onExit, room, session }: ArDemo
   return (
     <View style={styles.screen}>
       <ViroARSceneNavigator
-        initialScene={{ scene: FloorScanScene }}
+        initialScene={{ scene: SharedArenaScene }}
+        provider="none"
         style={styles.arView}
         viroAppProps={sceneBridge}
       />
@@ -104,7 +107,15 @@ export function ArDemoScreen({ onBattleComplete, onExit, room, session }: ArDemo
               ]}
             />
             <Text numberOfLines={1} style={styles.statusText}>
-              {phase === "organizer-lobby" ? "Arena locked · realtime lobby" : trackingCopy[trackingState]}
+              {phase === "organizer-lobby"
+                ? "Arena marker verified · realtime lobby"
+                : markerTracking === "tracked"
+                  ? "Arena marker locked"
+                  : markerTracking === "degraded"
+                    ? "Marker pose retained"
+                    : markerTracking === "lost"
+                      ? "Marker lost · scan again"
+                      : trackingCopy[trackingState]}
             </Text>
           </View>
           <View style={styles.phasePill}>
@@ -114,7 +125,7 @@ export function ArDemoScreen({ onBattleComplete, onExit, room, session }: ArDemo
           </View>
         </View>
 
-        {phase === "floor-scan" ? (
+        {phase === "marker-scan" ? (
           <View style={styles.scanContent}>
             <View pointerEvents="none" style={styles.scanGuide}>
               <View style={[styles.corner, styles.cornerTopLeft]} />
@@ -125,25 +136,25 @@ export function ArDemoScreen({ onBattleComplete, onExit, room, session }: ArDemo
             <View style={styles.bottomPanel}>
               <Text style={styles.panelKicker}>Organizer setup</Text>
               <Text style={styles.panelTitle}>
-                {floorFound ? "Arena floor found" : "Scan the floor"}
+                {markerFound ? "Arena marker found" : "Scan the arena marker"}
               </Text>
               <Text style={styles.panelBody}>
-                {floorFound
-                  ? "A demo floor plane is locked. The production flow will use the printed arena marker as the shared origin."
-                  : "Point down and move the phone in a slow arc. Keep textured floor details inside the frame."}
+                {markerFound
+                  ? "The printed marker now defines the shared origin and forward direction for every participant."
+                  : "Place the bundled 180 mm marker flat at arena center, then move slowly until its full border is visible."}
               </Text>
               <Pressable
                 accessibilityRole="button"
-                disabled={!floorFound}
+              disabled={!markerFound}
                 onPress={() => void openOrganizerLobby()}
                 style={({ pressed }) => [
                   styles.continueButton,
-                  !floorFound && styles.continueButtonDisabled,
-                  pressed && floorFound && styles.controlPressed,
+                !markerFound && styles.continueButtonDisabled,
+                pressed && markerFound && styles.controlPressed,
                 ]}
               >
                 <Text style={styles.continueButtonText}>
-                  {floorFound ? "Use floor and open lobby" : "Looking for floor…"}
+                {markerFound ? "Use marker and open lobby" : "Looking for marker…"}
                 </Text>
               </Pressable>
             </View>
@@ -165,15 +176,15 @@ export function ArDemoScreen({ onBattleComplete, onExit, room, session }: ArDemo
               </Text>
 
               {participants.map((participant) => {
-                const ready = participant.readiness === "waiting";
-                const detail = participant.selection
-                  ? `${getCharacter(participant.selection.characterId).displayName} · ${getCharacterColor(participant.selection.colorId).label}`
+                const ready = participant.ready && participant.positionLocked;
+                const detail = participant.characterId !== "default"
+                  ? `${getCharacter(participant.characterId).displayName} · ${getCharacterColor(participant.characterColorId).label}`
                   : participant.quizCompleted ? "Choosing character" : "Quiz in progress";
                 return (
-                <View key={participant.id} style={styles.lobbyPlayerRow}>
+                <View key={participant.playerId} style={styles.lobbyPlayerRow}>
                   <View style={[styles.playerStatusDot, !ready && styles.playerStatusDotPending]} />
                   <View style={styles.lobbyPlayerCopy}>
-                    <Text style={styles.lobbyPlayerName}>{participant.nickname}</Text>
+                    <Text style={styles.lobbyPlayerName}>{participant.displayName}</Text>
                     <Text style={styles.lobbyPlayerDetail}>{detail}</Text>
                   </View>
                   <Text style={[styles.lobbyPlayerState, !ready && styles.lobbyPlayerStatePending]}>
@@ -207,21 +218,15 @@ export function ArDemoScreen({ onBattleComplete, onExit, room, session }: ArDemo
               <View style={styles.organizerBattleCopy}>
                 <Text style={styles.healthLabel}>ORGANIZER VIEW</Text>
                 <Text style={styles.organizerBattleTitle}>Battle in progress</Text>
-                <Text style={styles.organizerBattleDetail}>{participants.length} players synchronized · room {room.code}</Text>
+                <Text style={styles.organizerBattleDetail}>{participants.length} players synchronized · room {room.roomId}</Text>
               </View>
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => void endBattle(session, room).catch((error: unknown) => setSyncError(error instanceof Error ? error.message : String(error)))}
-                style={({ pressed }) => [styles.endBattleButton, pressed && styles.controlPressed]}
-              >
-                <Text style={styles.endBattleButtonText}>End battle</Text>
-              </Pressable>
+              <Text style={styles.endBattleButtonText}>Server timer active</Text>
             </View>
             <View style={styles.organizerRoster}>
               <Text style={styles.organizerRosterTitle}>Live Battle Snapshot</Text>
               {participants.map((participant) => (
-                <Text key={participant.id} style={styles.organizerRosterRow}>
-                  {participant.nickname} · {room.stats[participant.id]?.eliminated ? "eliminated" : `${room.stats[participant.id]?.hp ?? 0} HP`}
+                <Text key={participant.playerId} style={styles.organizerRosterRow}>
+                  {participant.displayName} · {participant.eliminated ? "eliminated" : `${participant.hp} HP`}
                 </Text>
               ))}
             </View>

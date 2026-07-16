@@ -1,6 +1,6 @@
 import { ArraySchema } from "@colyseus/schema";
 import { createHash } from "node:crypto";
-import { Client, Room } from "colyseus";
+import { Client, Room } from "@colyseus/core";
 import {
   ARENA,
   applyDamage,
@@ -8,6 +8,7 @@ import {
   BATTLE,
   isClientEventPayload,
   isPublicRoomStateProjection,
+  isSessionRequestPayload,
   MAX_COMMANDS_PER_ROUND,
   MAX_MALFORMED_QUIZ_ATTEMPTS,
   normalizeDirection,
@@ -54,6 +55,7 @@ interface PrivatePlayer {
 interface CommandOutcome {
   readonly command: CommandName;
   readonly commandId: string;
+  readonly roundId: number;
   readonly serverNow: number;
 }
 
@@ -142,12 +144,14 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
     this.onMessage("start_quiz", (client, payload) => this.handleMessage(client, "start_quiz", payload));
     this.onMessage("start_battle", (client, payload) => this.handleMessage(client, "start_battle", payload));
     this.onMessage("reset_round", (client, payload) => this.handleMessage(client, "reset_round", payload));
+    this.onMessage("select_character", (client, payload) => this.handleMessage(client, "select_character", payload));
     this.onMessage("quiz_answer", (client, payload) => this.handleMessage(client, "quiz_answer", payload));
     this.onMessage("localization_changed", (client, payload) => this.handleMessage(client, "localization_changed", payload));
     this.onMessage("lock_position", (client, payload) => this.handleMessage(client, "lock_position", payload));
     this.onMessage("unlock_position", (client, payload) => this.handleMessage(client, "unlock_position", payload));
     this.onMessage("ready_changed", (client, payload) => this.handleMessage(client, "ready_changed", payload));
     this.onMessage("attack", (client, payload) => this.handleMessage(client, "attack", payload));
+    this.onMessage("request_session", (client, payload) => this.handleSessionRequest(client, payload));
 
     this.clock.setInterval(() => this.advanceTimers(), 100);
   }
@@ -323,10 +327,27 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
 
     const accepted = this.applyCommand(client, privatePlayer, command, now);
     if (!accepted) return;
-    const outcome: CommandOutcome = { command: name, commandId: command.commandId, serverNow: now };
+    const outcome: CommandOutcome = { command: name, commandId: command.commandId, roundId: this.state.roundId, serverNow: now };
     if (command.command !== "reset_round") outcomes.set(command.commandId, outcome);
     this.sendClientEvent(client, "command_accepted", outcome);
     this.touch();
+  }
+
+  private handleSessionRequest(client: Client, payload: unknown): void {
+    if (!isSessionRequestPayload(payload)) {
+      this.error(client, "CLIENT_VERSION_UNSUPPORTED");
+      return;
+    }
+    if (this.organizer?.sessionId === client.sessionId) {
+      this.sendClientEvent(client, "session_ready", { playerId: null, role: "organizer" });
+      return;
+    }
+    const playerId = this.playerIdBySessionId.get(client.sessionId);
+    if (playerId === undefined) {
+      this.error(client, "SESSION_EXPIRED");
+      return;
+    }
+    this.sendClientEvent(client, "session_ready", { playerId, role: "participant" });
   }
 
   private authorizedForCommand(isOrganizer: boolean, command: ValidatedCommand): boolean {
@@ -342,6 +363,7 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
       case "start_quiz": return this.startQuiz(client, now);
       case "start_battle": return this.startBattle(client, now);
       case "reset_round": return this.resetRound(client);
+      case "select_character": return actor !== undefined && this.selectCharacter(client, actor, command);
       case "quiz_answer": return actor !== undefined && this.submitQuizAnswer(client, actor, command, now);
       case "localization_changed": return actor !== undefined && this.changeLocalization(client, actor, command);
       case "lock_position": return actor !== undefined && this.lockPosition(client, actor, command);
@@ -357,6 +379,17 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
     if (target === undefined) return this.reject(client, "ROLE_FORBIDDEN", command.commandId);
     target.combatIncluded = command.included;
     if (!command.included) this.clearPreBattleState(target);
+    return true;
+  }
+
+  private selectCharacter(client: Client, actor: PrivatePlayer, command: Extract<ValidatedCommand, { command: "select_character" }>): boolean {
+    const player = this.state.players.get(actor.playerId);
+    if (player === undefined) return this.reject(client, "SESSION_EXPIRED", command.commandId);
+    if (this.state.phase !== "lobby" && this.state.phase !== "quiz" && this.state.phase !== "localization") {
+      return this.rejectPhase(client, command.commandId);
+    }
+    player.characterId = command.characterId;
+    player.characterColorId = command.colorId;
     return true;
   }
 

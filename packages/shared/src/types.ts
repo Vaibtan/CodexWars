@@ -1,4 +1,4 @@
-import type { PROTOCOL_VERSION, QUIZ } from "./constants.js";
+import type { CHARACTER_COLOR_IDS, CHARACTER_IDS, PROTOCOL_VERSION, QUIZ } from "./constants.js";
 
 export type ProtocolVersion = typeof PROTOCOL_VERSION;
 export type RoomId = string;
@@ -6,15 +6,13 @@ export type PlayerId = string;
 export type RoundId = number;
 export type CommandId = string;
 export type EventSequence = number;
-export type CharacterId = "default" | "knight" | "ninja" | "wizard";
-export type CharacterColorId = "gold" | "coral" | "aqua" | "violet";
-export type WeaponId = "bolt" | "fireball";
+export type CharacterId = typeof CHARACTER_IDS[number];
+export type CharacterColorId = typeof CHARACTER_COLOR_IDS[number];
+export type WeaponId = "bolt";
 
 export type RoomPhase =
   | "lobby"
   | "quiz"
-  | "quiz-results"
-  | "arena-setup"
   | "localization"
   | "positioning"
   | "countdown"

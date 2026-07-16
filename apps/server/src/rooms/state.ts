@@ -1,6 +1,6 @@
 import { ArraySchema, defineTypes, MapSchema, Schema } from "@colyseus/schema";
 import { ARENA, BATTLE, PROTOCOL_VERSION, QUIZ, WEAPONS } from "@codexwars/shared";
-import type { BattleStatus, CharacterId, LocalizationState, QuizDifficulty, QuizStatus, RoomPhase, WeaponId } from "@codexwars/shared";
+import type { BattleStatus, CharacterColorId, CharacterId, LocalizationState, QuizDifficulty, QuizStatus, RoomPhase, WeaponId } from "@codexwars/shared";
 
 export class OrganizerState extends Schema {
   connected = false;
@@ -21,6 +21,7 @@ export class PlayerState extends Schema {
   positionZ = 0;
   ready = false;
   characterId: CharacterId = "default";
+  characterColorId: CharacterColorId = "gold";
   maxHp: number = BATTLE.START_HP;
   hp: number = BATTLE.START_HP;
   shield: number = 0;
@@ -101,7 +102,7 @@ export class WarRoomState extends Schema {
 
 defineTypes(OrganizerState, { connected: "boolean", displayName: "string" });
 defineTypes(PlayerState, {
-  characterId: "string", charges: "number", combatIncluded: "boolean", connected: "boolean", correctAnswers: "number", disconnectedAt: "number", displayName: "string", eliminated: "boolean", hasAnsweredCurrent: "boolean", hp: "number", localization: "string", maxHp: "number", nextAttackAt: "number", playerId: "string", positionLocked: "boolean", positionX: "number", positionZ: "number", quizCompleted: "boolean", ready: "boolean", shield: "number", weaponId: "string"
+  characterColorId: "string", characterId: "string", charges: "number", combatIncluded: "boolean", connected: "boolean", correctAnswers: "number", disconnectedAt: "number", displayName: "string", eliminated: "boolean", hasAnsweredCurrent: "boolean", hp: "number", localization: "string", maxHp: "number", nextAttackAt: "number", playerId: "string", positionLocked: "boolean", positionX: "number", positionZ: "number", quizCompleted: "boolean", ready: "boolean", shield: "number", weaponId: "string"
 });
 defineTypes(ArenaState, { configured: "boolean", markerExclusionRadiusM: "number", minimumSpacingM: "number", radiusM: "number" });
 defineTypes(QuizOptionState, { id: "string", label: "string" });

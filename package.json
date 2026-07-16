@@ -11,15 +11,14 @@
     "npm": ">=10"
   },
   "overrides": {
-    "@types/react": "~19.1.10",
+    "@types/react": "19.1.10",
     "react": "19.1.0",
     "react-native": "0.81.5",
-    "typescript": "~5.9.2"
+    "typescript": "5.9.3"
   },
   "scripts": {
     "mobile": "npm run start --workspace @codexwars/mobile",
     "server": "npm run dev --workspace @codexwars/server",
-    "seed:quiz": "npm run seed:quiz --workspace @codexwars/server",
     "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present"
   }

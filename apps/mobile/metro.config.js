@@ -11,6 +11,14 @@ config.watchFolders = Array.from(new Set([...(config.watchFolders ?? []), worksp
 // `.js` specifiers. Node/tsx and Vitest map those specifiers back to `.ts`, but
 // Metro needs the extension removed so its sourceExts resolution can do so.
 config.resolver.resolveRequest = (context, moduleName, platform) => {
+  if (moduleName === "@colyseus/sdk") {
+    return context.resolveRequest(
+      context,
+      path.join(workspaceRoot, "node_modules", "@colyseus", "sdk", "dist", "colyseus.js"),
+      platform,
+    );
+  }
+
   const isSharedWorkspaceImport = context.originModulePath.includes(
     `${path.sep}packages${path.sep}shared${path.sep}`,
   );

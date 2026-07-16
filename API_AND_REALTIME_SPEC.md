@@ -1,14 +1,14 @@
 # CodexWars P0 — API and Realtime Specification
 
 **Status:** Authoritative P0 interface contract
-**Version:** 1.2
-**Last updated:** 2026-07-14
+**Version:** 1.3
+**Last updated:** 2026-07-16
 **Applies to:** M1 hackathon vertical slice
 
 This document is the sole prose authority for P0 room admission, synchronized state, commands, events, errors, timing, ordering, and reconnection. It implements, but does not repeat, the product and structural decisions in:
 
-- `PRD.md` v2.4
-- `BUILD_SPEC.md` v1.4
+- `PRD.md` v2.5
+- `BUILD_SPEC.md` v1.5
 - `ARCHITECTURE.md` v1.2
 
 If this contract conflicts with one of those documents, stop implementation and resolve the documents together. Do not silently add a second source of truth.
@@ -21,7 +21,7 @@ If this contract conflicts with one of those documents, stop implementation and 
 - Colyseus matchmaking owns admission. Its four-digit `roomId` is the public code.
 - The server binds one non-combat organizer and up to 12 participant records; role and player authority never come from command payloads.
 - Schema state is recovery truth. Messages carry commands, acknowledgements, errors, and transient effects.
-- The server receives no camera frames, Viro objects, continuous poses, or client-computed hits. P0 uses the fixed bundled quiz, avatar, and bolt loadout.
+- The server receives no camera frames, Viro objects, continuous poses, or client-computed hits. P0 uses the fixed bundled quiz, approved cosmetic catalog, and Bolt-only loadout.
 
 ---
 
@@ -124,6 +124,18 @@ P0 has **session authentication**, not account authentication:
 - Room expiry or server restart invalidates the whole session.
 
 This protects organizer controls and participant ownership inside a live room without introducing student accounts or an internet dependency. It does not claim durable real-world identity or strong anti-cheat, both of which are P0 non-goals.
+
+After joining, the mobile adapter registers its private message handlers and requests the already-bound identity:
+
+```ts
+room.send("request_session", { protocolVersion: 1 });
+
+type SessionReady =
+  | { role: "organizer"; playerId: null }
+  | { role: "participant"; playerId: PlayerId };
+```
+
+The server accepts only the exact request shape and returns `session_ready` privately. This message reports an existing server binding; it does not let the client choose a role or player ID. It exists because nicknames are not identifiers and transport session IDs do not belong in synchronized state.
 
 ### 3.4 Room ID allocation
 
@@ -243,7 +255,8 @@ type PlayerPublicState = {
   positionZ: number;
   ready: boolean;
 
-  characterId: "default";
+  characterId: "default" | "knight" | "ninja" | "wizard";
+  characterColorId: "gold" | "coral" | "aqua" | "violet";
   maxHp: number;
   hp: number;
   shield: number;
@@ -421,6 +434,20 @@ type ResetRound = CommandMeta;
 - Returns to `lobby`; no previous-round data remains available after reset.
 
 ### 6.2 Participant commands
+
+#### `select_character`
+
+```ts
+type SelectCharacter = CommandMeta & {
+  characterId: "default" | "knight" | "ninja" | "wizard";
+  colorId: "gold" | "coral" | "aqua" | "violet";
+};
+```
+
+- Allowed only in `lobby`, `quiz`, or `localization`.
+- Both fields are checked against shared exact allow-lists; unknown or extra authority-shaped fields are rejected.
+- The selection changes presentation only. It never changes HP, shield, hit radius, range, damage, charges, or cooldown.
+- Entering `positioning` freezes the round's selection.
 
 #### `quiz_answer`
 
@@ -670,7 +697,7 @@ Rooms expire after two hours without a successful join, reconnect, or accepted i
 
 ## 9. Error catalogue
 
-Matchmaking errors are translated by `warRoomClient.ts` into the same app-level error shape used for room messages.
+Matchmaking errors are translated by `apps/mobile/src/features/warRoom/realtimeClient.ts` into the same app-level error shape used for room messages.
 
 | Code | Surface | Meaning | Retryable |
 |---|---|---|---|

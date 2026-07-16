@@ -1,10 +1,10 @@
 # CodexWars — Product Requirements Document
 
-**Version:** 2.4
+**Version:** 2.5
 **Status:** Approved product direction — exact implementation contracts live in `BUILD_SPEC.md`, `ARCHITECTURE.md`, `API_AND_REALTIME_SPEC.md`, and `docs/AR_IMPLEMENTATION_SPEC.md`; archived documents are historical only
 **Horizons:** Hackathon demo first → evolve into a real product
 **Primary platforms:** Android and iOS (both required for P0; iOS iterates through EAS cloud development builds and is rehearsed through TestFlight on physical iPhones)
-**Last updated:** 2026-07-14
+**Last updated:** 2026-07-16
 
 ---
 
@@ -25,11 +25,11 @@ These decisions were made after researching the July 2026 AR landscape and the h
 | D1 | **Marker-based colocation replaces ARCore Cloud Anchors** as the shared-origin mechanism. A printed image marker on the floor is the arena origin; every phone scans it. | The hosted spatial-anchor market collapsed in 2024–2026 (Azure Spatial Anchors retired Nov 2024; Niantic Lightship Shared AR shut down May 2026; 8th Wall hosted service ended Feb 2026). Google Cloud Anchors survives but is in maintenance mode. Marker colocation needs no third-party spatial cloud, is cross-platform, more predictable in feature-poor rooms, and is what indie colocated-AR projects have converged on. |
 | D2 | **Keep the stack: React Native + Expo (dev build) + @reactvision/react-viro + Colyseus + TypeScript.** | Viro is actively maintained again (ReactVision spin-out, releases through June 2026, RN New Architecture + current Expo support) and ships the image-marker API (`ViroARImageMarker`) that D1 needs. Colyseus 0.17 (Feb 2026) adds automatic reconnection — a direct fit for mobile churn. One language across app, AR, and server suits a TS-strong solo developer. |
 | D3 | **Android and iOS are both P0 platforms.** Android is developed locally; iOS iterates through EAS cloud development builds and its rehearsal build is distributed through TestFlight to a physical ARKit-compatible iPhone. | The shared React Native codebase and marker-based origin make mixed-platform play a core product claim. Windows cannot build iOS locally, so a paid Apple Developer account, EAS cloud build, registered iPhone, TestFlight configuration, and early device testing are mandatory P0 dependencies. |
-| D4 | **Battles are hard-capped at 90 seconds** (default 60s). | Sustained camera + AR inference thermally throttles phones in roughly 60–90 seconds; battery drain and arm fatigue ("gorilla arm") compound it. Short battles are also better pacing for a classroom finale. |
+| D4 | **P0 battles are fixed at 60 seconds.** | Sustained camera + AR inference thermally throttles phones, while battery drain and arm fatigue compound it. A fixed duration also keeps one authoritative timer and a repeatable classroom pace. |
 | D5 | **Non-AR fallback mode is a P1 requirement, not an afterthought.** A participant whose phone cannot localize plays the same battle from a top-down minimap view. | Combat is already 2D server-side, so a 2D client view is cheap insurance against device fragmentation. If M0 fails, AR P0 is blocked; switching to a non-AR P0 requires an explicit revised-product decision rather than silently changing scope. |
 | D6 | **Quiz rewards become a budget of choices with catch-up mechanics on the product roadmap** (flat mapping stays for the hackathon MVP). | Gimkit/Blooket research: successful platforms map score to spendable resources plus randomness/steal mechanics. "Quiz winner automatically wins the battle" is a documented failure mode — the battle must favor the quiz winner, not crown them. |
 | D7 | **Privacy-minimal by design: nickname-only joins, no accounts, no camera upload, no third-party ad/analytics SDKs.** | Classroom tools spread teacher-driven and bottom-up; COPPA applies to under-13 users regardless of who consented. Minimal data collection keeps a single teacher able to run a session with zero IT approval. |
-| D8 | **P0 renders one bundled default GLB avatar, basic bolt, and shield-only quiz rewards.** Three selectable bundled GLB cosmetics, fireball, and free spectator view are P1. | GLB rendering provides the requested 3D AR presence while gameplay remains a small, deterministic 2D system. |
+| D8 | **P0 uses three selectable bundled GLB characters with four approved palettes, basic Bolt, and shield-only quiz rewards.** Character and palette choice are cosmetic and never change collision or Battle Stats. Fireball and free spectator view remain post-P0. | The team already produced a bounded local asset catalog, so cosmetic choice can ship without expanding the authoritative combat model or adding remote asset delivery. |
 | D9 | **P0 tracking loss is local and non-pausing during battle.** Before battle it clears readiness. During battle the locked server position survives, but firing is allowed only while the AR module is producing a fresh tracked or inertial pose; a stale/unavailable pose disables firing and shows a re-scan prompt. | A global pause is too disruptive for the vertical slice, but firing from a frozen aim direction would be incorrect and unfair. Organizer-controlled pause/recovery policy is P1. |
 
 ---
@@ -41,13 +41,13 @@ These decisions were made after researching the July 2026 AR landscape and the h
 - Selects or authors the quiz (MVP: fixed demo quiz)
 - Prints/places the arena marker and defines the arena
 - Monitors readiness on a top-down minimap
-- Starts and ends the battle; sees final standings
+- Starts the battle; observes server-timed/last-alive completion and final standings
 - Is a non-combat controller in P0 and never counts toward participant capacity or battle readiness; a dual organizer/player role is post-P0
 
 ### Participant (student / attendee)
 - Joins with the room code and a nickname (no account)
 - Answers the quiz; receives battle powers
-- Uses the P0 bundled default GLB avatar (cosmetic GLB/palette selection is P1)
+- Chooses one approved bundled GLB character and palette; the selection is cosmetic only
 - Scans the floor marker to localize, locks a standing position
 - Battles: rotates in place, aims through the camera, fires
 
@@ -91,7 +91,7 @@ These decisions were made after researching the July 2026 AR landscape and the h
 ### 5.2 Participant flow
 1. **Join War** → four-digit code + nickname.
 2. Completes the fixed ten-question Programming Fundamentals quiz, sees earned powers.
-3. Continues with the bundled default P0 GLB avatar (three cosmetic GLB choices and palette choice arrive in P1).
+3. Chooses Knight, Ninja, or Wizard and one approved palette; this does not change Battle Stats.
 4. Points the camera at the floor marker until the app localizes ("Arena found!").
 5. Stands anywhere valid in the arena, **Lock My Position** (server validates boundary + spacing), then **Ready**.
 6. On start: rotates in place, aims via the camera crosshair at real classmates (rendered as GLB avatars with name and health bar), fires with on-screen buttons.
@@ -160,8 +160,9 @@ so the quiz winner is favored, never guaranteed.
 | Weapon | Range | Ray width | Damage | Rule |
 |---|---:|---:|---:|---|
 | Basic bolt | 8 m | 0.35 m | 10 | Short cooldown, unlimited |
-| Fireball | 7 m | 0.55 m | 20 | Limited charges |
 | Shield | — | — | — | Absorbs damage before HP |
+
+Fireball is a future mechanic and has no P0 state, command, UI control, or dormant resolver.
 
 ---
 
@@ -174,10 +175,10 @@ so the quiz winner is favored, never guaranteed.
 - **Colocation:** bundled printable marker; marker scan → localization state; circular arena boundary
 - **Positioning:** lock marker-relative X/Z; server validates boundary + spacing; organizer minimap
 - **Battle:** synchronized countdown; crosshair + floor-projected aim; server-authoritative 2D hit testing; basic attack; HP + shield; cooldowns; elimination overlay + live standings; winner; 60 s timer
-- **Feedback:** target name/HP on lock, projectile/flash + hit effects, sound or haptics, winner screen; one bundled default GLB avatar only
+- **Feedback:** target name/HP on lock, projectile/flash + hit effects, sound or haptics, winner screen; three bundled cosmetic GLBs with four approved palettes
 
 ### P1 — after P0 works
-- Fireball; three selectable bundled GLB cosmetic characters + palette choice
+- Fireball only after its reward, charge, command, and balance contract is designed and tested
 - Spectator view for eliminated players
 - **Non-AR minimap fallback mode** (D5)
 - Tracking-loss pause; organizer force-remove/reset player
@@ -256,7 +257,7 @@ Each client establishes the shared arena origin by recognizing the floor marker.
 ### Privacy (D7)
 - No camera frames ever leave the device; no facial recognition; camera purpose explained at permission time.
 - Nickname-only participants, no student accounts, no third-party ads/analytics SDKs, data minimization throughout.
-- Room, combat, and nickname state is in-memory and deleted on room expiry. Firestore durably stores server-written quiz templates, answer submissions, and results; it never receives camera data or combat events, and mobile clients may read only their own completed result. Operational logs redact nicknames and use a short retention period; reconnect tokens are random and short-lived.
+- Room, quiz, combat, results, and nickname state are in-memory and deleted on room expiry. P0 has no Firebase, database, account, or cloud-persistence dependency. Operational logs redact nicknames; reconnect tokens are random, short-lived, and never synchronized or logged.
 
 ### Accessibility
 - Target lock never communicated by color alone; hits paired with sound/haptics; high-contrast panels and scrims over camera backgrounds; organizer can include someone in the quiz but exclude them from combat.
@@ -285,7 +286,7 @@ Each client establishes the shared arena origin by recognizing the floor marker.
 |---|---|---|
 | **M0 — Colocation spike** | Expo/Viro builds on one Android and one iPhone; both scan one marker; a test object appears in the same physical spot | Go/conditional/no-go on cross-platform marker quality; no-go blocks AR P0 pending an explicit revised-product decision |
 | **M1 — Hackathon vertical slice (P0)** | Full flow: create → join → quiz → localize → lock → battle → winner, on 3–4 devices including Android and iOS; final iOS rehearsal build distributed through TestFlight | Demo success criteria below, twice in a row |
-| **M2 — Hardening (P1)** | Fireball, selectable GLB cosmetics/palettes, spectator view, minimap fallback, reconnection polish | A stranger can run a session from a one-page guide |
+| **M2 — Hardening (P1)** | Spectator view, minimap fallback, tracking recovery, organizer moderation, reconnection polish; Fireball only after a separate game/protocol decision | A stranger can run a session from a one-page guide |
 | **M3 — Product (P2)** | Authored quizzes, loadout economy, big-screen spectator view, analytics | First real classroom pilots |
 
 ### Demo success criteria (M1)

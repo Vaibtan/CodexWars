@@ -1,75 +1,58 @@
 import { useEffect, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { deriveBattleLoadout, type WarRoomState } from "@codexwars/shared";
+import { startingShieldForScore, type PublicRoomState } from "@codexwars/shared";
 import { colors } from "../components/theme";
-import { getQuizQuestion } from "../features/quiz/quizCatalog";
-import type { WarRoomSession } from "../features/warRoom/types";
-import { getOwnQuizAnswer, submitQuizAnswer } from "../lib/firebase/warRooms";
+import type { WarRoomRealtimeClient } from "../features/warRoom/realtimeClient";
 
-export function ParticipantQuizScreen({ onLeave, room, session }: { onLeave: () => void; room: WarRoomState; session: WarRoomSession }) {
+export function ParticipantQuizScreen({ client, onLeave, room }: { client: WarRoomRealtimeClient; onLeave: () => void; room: PublicRoomState }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [clock, setClock] = useState(Date.now());
-  const question = getQuizQuestion(room.quiz.currentQuestionId);
+  const question = room.quiz.currentQuestion.id ? room.quiz.currentQuestion : null;
+  const participant = client.session.playerId === null ? undefined : room.players[client.session.playerId];
 
   useEffect(() => {
-    let active = true;
-    setSelected(null); setSubmitted(false); setError(null);
-    const questionId = room.quiz.currentQuestionId;
-    if (questionId) {
-      void getOwnQuizAnswer(session, room.roomId, questionId).then((answer) => {
-        if (!active || !answer) return;
-        setSelected(answer.optionId);
-        setSubmitted(true);
-      }).catch((caught: unknown) => {
-        if (active) setError(caught instanceof Error ? caught.message : String(caught));
-      });
-    }
-    return () => { active = false; };
-  }, [room.quiz.currentQuestionId, room.roomId, session]);
+    setSelected(null);
+    setSubmitted(false);
+    setError(null);
+  }, [room.quiz.currentQuestion.id]);
+  useEffect(() => {
+    if (participant?.hasAnsweredCurrent) setSubmitted(true);
+  }, [participant?.hasAnsweredCurrent]);
   useEffect(() => { const interval = setInterval(() => setClock(Date.now()), 500); return () => clearInterval(interval); }, []);
 
   const submit = async () => {
-    if (!selected || submitted || room.quiz.status !== "open") return;
+    if (!question || !selected || submitted || room.quiz.status !== "question") return;
     setBusy(true); setError(null);
-    try { await submitQuizAnswer(session, room, selected); setSubmitted(true); }
+    try { await client.send({ optionId: selected, questionId: question.id, type: "quiz_answer" }); setSubmitted(true); }
     catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }
     finally { setBusy(false); }
   };
-  const seconds = Math.max(0, Math.ceil(((room.quiz.questionEndsAt ?? clock) - clock) / 1_000));
+  const estimatedServerNow = clock + (room.serverNow - Date.now());
+  const seconds = Math.max(0, Math.ceil((room.quiz.questionEndsAt - estimatedServerNow) / 1_000));
   const revealed = room.quiz.status === "reveal";
-  const answerLocked = submitted || revealed || room.quiz.status !== "open" || seconds === 0;
-  const answeredCorrectly = revealed && selected !== null && selected === room.quiz.correctOptionId;
-  const currentScore = room.quiz.scores[session.uid] ?? 0;
-  const previousScore = Math.max(0, currentScore - (answeredCorrectly ? 1 : 0));
-  const previousLoadout = deriveBattleLoadout({ correctAnswers: previousScore, totalQuestions: 10 });
-  const currentLoadout = deriveBattleLoadout({ correctAnswers: currentScore, totalQuestions: 10 });
-  const statChanges = [
-    currentLoadout.maxShield > previousLoadout.maxShield ? `Shield +${currentLoadout.maxShield - previousLoadout.maxShield} HP` : null,
-    currentLoadout.weapons.bolt.damage > previousLoadout.weapons.bolt.damage ? `Bolt damage +${currentLoadout.weapons.bolt.damage - previousLoadout.weapons.bolt.damage}` : null,
-    currentLoadout.weapons.bolt.cooldownMs < previousLoadout.weapons.bolt.cooldownMs ? `Bolt cooldown −${previousLoadout.weapons.bolt.cooldownMs - currentLoadout.weapons.bolt.cooldownMs} ms` : null,
-    currentLoadout.weapons.fireball.charges !== previousLoadout.weapons.fireball.charges ? `Fireball charges +${(currentLoadout.weapons.fireball.charges ?? 0) - (previousLoadout.weapons.fireball.charges ?? 0)}` : null,
-    currentLoadout.weapons.fireball.damage > previousLoadout.weapons.fireball.damage ? `Fireball damage +${currentLoadout.weapons.fireball.damage - previousLoadout.weapons.fireball.damage}` : null,
-    ...currentLoadout.abilities.filter((ability) => !previousLoadout.abilities.some((previous) => previous.id === ability.id)).map((ability) => `Unlocked: ${ability.label}`),
-  ].filter((change): change is string => Boolean(change));
+  const answerLocked = submitted || revealed || room.quiz.status !== "question" || seconds === 0;
+  const answeredCorrectly = revealed && selected !== null && selected === room.quiz.revealedCorrectOptionId;
+  const currentScore = participant?.correctAnswers ?? 0;
+  const scoredQuestions = Math.max(0, room.quiz.questionIndex + (revealed ? 1 : 0));
 
   return <SafeAreaView edges={["top", "bottom"]} style={styles.safe}>
     <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
       <View style={styles.header}><View style={styles.brandMark}><Text style={styles.brandMarkText}>C</Text></View><Text style={styles.brand}>CODEX<Text style={styles.purple}>WARS</Text></Text><Pressable accessibilityRole="button" onPress={onLeave} style={styles.leave}><Text style={styles.leaveText}>Leave</Text></Pressable></View>
-      <View style={styles.quizHeader}><Text style={styles.kicker}>LIVE QUIZ · ROOM {room.code}</Text><Text style={styles.title}>{question ? `Question ${room.quiz.currentQuestionIndex + 1}` : "Waiting for organizer"}</Text><Text style={styles.progress}>{room.quiz.completedQuestionCount} of 10 scored</Text></View>
+      <View style={styles.quizHeader}><Text style={styles.kicker}>LIVE QUIZ · ROOM {room.roomId}</Text><Text style={styles.title}>{question ? `Question ${room.quiz.questionIndex + 1}` : "Quiz complete"}</Text><Text style={styles.progress}>{scoredQuestions} of {room.quiz.questionCount} scored</Text></View>
       {question ? <>
         <View style={styles.timer}><Text style={styles.timerValue}>{revealed ? "ANSWER" : `00:${String(seconds).padStart(2, "0")}`}</Text><Text style={styles.timerLabel}>{revealed ? "REVEALED" : "SECONDS LEFT"}</Text></View>
-        <View style={styles.questionCard}><Text style={styles.topic}>{question.topic}</Text><Text style={styles.question}>{question.prompt}</Text>{question.options.map((option, index) => {
+        <View style={styles.questionCard}><Text style={styles.topic}>{question.difficulty.toUpperCase()}</Text><Text style={styles.question}>{question.prompt}</Text>{question.options.map((option, index) => {
           const isSelected = selected === option.id;
-          const isCorrect = revealed && option.id === room.quiz.correctOptionId;
+          const isCorrect = revealed && option.id === room.quiz.revealedCorrectOptionId;
           const isWrong = revealed && isSelected && !isCorrect;
           return <Pressable key={option.id} accessibilityRole="radio" accessibilityState={{ checked: isSelected, disabled: answerLocked }} disabled={answerLocked} onPress={() => setSelected(option.id)} style={({ pressed }) => [styles.option, isSelected && styles.optionSelected, isCorrect && styles.optionCorrect, isWrong && styles.optionWrong, pressed && styles.pressed]}><Text style={[styles.optionKey, (isSelected || isCorrect) && styles.optionKeyActive]}>{"ABCD"[index]}</Text><Text style={styles.optionText}>{option.label}</Text>{isCorrect ? <Text style={styles.correctMark}>✓</Text> : null}</Pressable>;
         })}</View>
-        {revealed ? <View style={[styles.feedback, !answeredCorrectly && styles.feedbackWrong]}><Text style={[styles.feedbackTitle, !answeredCorrectly && styles.feedbackTitleWrong]}>{answeredCorrectly ? "Correct — battle power earned" : selected ? "Incorrect — no stat reward" : "No answer submitted"}</Text><Text style={styles.feedbackBody}>{answeredCorrectly ? statChanges.length > 0 ? statChanges.join("  ·  ") : "Correct answer banked. Your score increased by one." : `Stats unchanged: ${currentLoadout.maxHp} HP, ${currentLoadout.maxShield} shield, ${currentLoadout.weapons.bolt.damage} bolt damage.`}</Text><Text style={styles.feedbackWait}>The organizer controls when everyone moves to the next question.</Text></View> : <Pressable accessibilityRole="button" accessibilityState={{ disabled: !selected || answerLocked || busy }} disabled={!selected || answerLocked || busy} onPress={() => void submit()} style={[styles.submit, (!selected || answerLocked || busy) && styles.disabled]}><Text style={styles.submitText}>{submitted ? "Answer locked — waiting for organizer" : seconds === 0 ? "Time expired" : busy ? "Submitting…" : "Lock answer"}</Text></Pressable>}
-      </> : <View style={styles.waiting}><View style={styles.waitingOrb}><Text style={styles.waitingOrbText}>✓</Text></View><Text style={styles.waitingTitle}>You’re in the quiz.</Text><Text style={styles.waitingBody}>Stay here. The next question will appear when the organizer opens it.</Text></View>}
+        {revealed ? <View style={[styles.feedback, !answeredCorrectly && styles.feedbackWrong]}><Text style={[styles.feedbackTitle, !answeredCorrectly && styles.feedbackTitleWrong]}>{answeredCorrectly ? "Correct — quiz shield earned" : selected ? "Incorrect — score unchanged" : "No answer submitted"}</Text><Text style={styles.feedbackBody}>{room.quiz.revealedExplanation || `Current score: ${currentScore}/${room.quiz.questionCount}. Starting shield: ${startingShieldForScore(currentScore)}.`}</Text><Text style={styles.feedbackWait}>The next question opens automatically after this reveal.</Text></View> : <Pressable accessibilityRole="button" accessibilityState={{ disabled: !selected || answerLocked || busy }} disabled={!selected || answerLocked || busy} onPress={() => void submit()} style={[styles.submit, (!selected || answerLocked || busy) && styles.disabled]}><Text style={styles.submitText}>{submitted ? "Answer locked — waiting for reveal" : seconds === 0 ? "Time expired" : busy ? "Submitting…" : "Lock answer"}</Text></Pressable>}
+      </> : <View style={styles.waiting}><View style={styles.waitingOrb}><Text style={styles.waitingOrbText}>✓</Text></View><Text style={styles.waitingTitle}>Quiz complete.</Text><Text style={styles.waitingBody}>Your result is synchronized. Continue to character selection.</Text></View>}
       {error ? <Text accessibilityLiveRegion="assertive" style={styles.error}>{error}</Text> : null}
     </ScrollView>
   </SafeAreaView>;

@@ -3,21 +3,21 @@
   "version": "1.0.0",
   "main": "index.ts",
   "dependencies": {
-    "@react-native-async-storage/async-storage": "2.2.0",
-    "@reactvision/react-viro": "2.53.1",
+    "@colyseus/sdk": "0.17.43",
     "@codexwars/shared": "0.1.0",
-    "expo": "~54.0.35",
+    "@reactvision/react-viro": "2.53.1",
+    "expo": "~54.0.36",
     "expo-dev-client": "~6.0.21",
     "expo-status-bar": "~3.0.9",
     "expo-system-ui": "~6.0.9",
-    "firebase": "12.16.0",
     "react": "19.1.0",
     "react-native": "0.81.5",
     "react-native-safe-area-context": "~5.6.0"
   },
   "devDependencies": {
-    "@types/react": "~19.1.10",
-    "typescript": "~5.9.2"
+    "@types/react": "19.1.10",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
   },
   "scripts": {
     "start": "expo start --dev-client",
@@ -25,7 +25,9 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
-    "test:native-identity": "node --test test/characterPreviewNativeIdentity.test.mjs"
+    "test": "vitest run src && node --test test/characterPreviewNativeIdentity.test.mjs",
+    "test:native-identity": "node --test test/characterPreviewNativeIdentity.test.mjs",
+    "test:bundle:android": "expo export --platform android --output-dir ../../tmp/expo-mobile-bundle-test --clear"
   },
   "private": true
 }

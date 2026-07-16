@@ -5,8 +5,6 @@ export * from "./constants.js";
 export * from "./protocol.js";
 export * from "./quiz.js";
 export * from "./types.js";
-export * from "./battle/index.js";
-export * from "./realtime/index.js";
 
 export interface CharacterSelection {
   characterId: CharacterId;

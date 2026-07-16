@@ -11,7 +11,7 @@ The active stack and requirements are defined elsewhere; this file records only 
 
 ### 1. Android and iOS AR with Expo/Viro — feasible, with a device gate
 
-ReactVision's official Expo guide states that ViroReact does **not** run in Expo Go and requires a development client or prebuild plus a rebuild after adding the config plugin. It supports Android `AR` mode (ARCore), iOS permission configuration, and documents support through Expo SDK 57 / React Native 0.86. This matches the checked-in scaffold, but documentation compatibility is not a substitute for installing the Viro plugin and opening the same development-build commit on both target devices. [Viro Expo integration guide](https://viro-community.readme.io/docs/integrating-with-expo)
+ReactVision's official Expo guide states that ViroReact does **not** run in Expo Go and requires a development client or prebuild plus a rebuild after adding the config plugin. It supports Android `AR` mode (ARCore) and iOS permission configuration. The checked-in scaffold is pinned to Expo SDK 54 / React Native 0.81 with `@reactvision/react-viro` 2.53.1; documentation compatibility is not a substitute for opening the same development-build commit on both target devices. [Viro Expo integration guide](https://viro-community.readme.io/docs/integrating-with-expo)
 
 For Windows development, EAS performs builds on Expo servers and can create iOS builds from non-macOS hosts. A physical iPhone device build still requires paid Apple Developer signing; an iOS Simulator is macOS-only and cannot substitute for this AR test. [Expo development-build documentation](https://docs.expo.dev/develop/development-builds/create-a-build/)
 
@@ -23,7 +23,7 @@ Android device eligibility remains a real constraint: ARCore certification is de
 
 ### 2. GLB rendering plan — feasible and bounded
 
-The selected renderer can track an image, render bundled GLB content in AR, and provide camera pose data. P0 needs one default GLB, labels, a ring, flash/projectile feedback, and a camera-space HUD; it does not need a general 3D game engine. Viro documents billboard transform behavior and native updates that avoid React re-renders for frequent scene changes. [Viro image marker API](https://viro-community.readme.io/docs/viroarimagemarker)
+The selected renderer can track an image, render bundled GLB content in AR, and provide camera pose data. P0 uses the bounded Knight/Ninja/Wizard cosmetic catalog, labels, health UI, effects, and a camera-space HUD; it does not need a general 3D game engine. Viro documents billboard transform behavior and native updates that avoid React re-renders for frequent scene changes. [Viro image marker API](https://viro-community.readme.io/docs/viroarimagemarker)
 
 The enforceable asset budgets and rendering constraints live only in `AR_IMPLEMENTATION_SPEC.md`. ReactVision documents additional setup for non-LiDAR depth features; that evidence supports keeping depth/occlusion outside P0. [Viro Expo integration guide](https://viro-community.readme.io/docs/integrating-with-expo)
 

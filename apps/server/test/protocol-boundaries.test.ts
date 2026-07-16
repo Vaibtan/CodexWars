@@ -1,8 +1,41 @@
 import { describe, expect, it } from "vitest";
-import { isClientEventPayload, isPublicRoomStateProjection, isServerEventPayload, normalizeDirection, parseCommand } from "@codexwars/shared";
+import { isClientEventPayload, isPublicRoomStateProjection, isServerEventPayload, isSessionRequestPayload, normalizeDirection, parseCommand } from "@codexwars/shared";
 import { WarRoomState } from "../src/rooms/state.js";
 
 describe("shared protocol boundaries", () => {
+  it("accepts only approved cosmetic selections with an exact payload", () => {
+    expect(parseCommand("select_character", {
+      characterId: "knight",
+      colorId: "gold",
+      commandId: "character-1",
+      roundId: 1
+    })).toEqual({
+      ok: true,
+      value: {
+        characterId: "knight",
+        colorId: "gold",
+        command: "select_character",
+        commandId: "character-1",
+        roundId: 1
+      }
+    });
+
+    expect(parseCommand("select_character", {
+      characterId: "dragon",
+      colorId: "gold",
+      commandId: "character-2",
+      roundId: 1
+    })).toEqual({ code: "POSITION_INVALID", ok: false });
+
+    expect(parseCommand("select_character", {
+      characterId: "knight",
+      colorId: "gold",
+      commandId: "character-3",
+      hitRadiusM: 9,
+      roundId: 1
+    })).toEqual({ code: "POSITION_INVALID", ok: false });
+  });
+
   it("rejects oversize and authority-shaped command payloads before gameplay", () => {
     expect(parseCommand("attack", {
       commandId: "attack-1",
@@ -39,6 +72,17 @@ describe("shared protocol boundaries", () => {
   });
 
   it("allows only exact server and client event payloads", () => {
+    expect(isClientEventPayload("command_accepted", {
+      command: "start_quiz",
+      commandId: "start-1",
+      roundId: 1,
+      serverNow: 1_000
+    })).toBe(true);
+    expect(isClientEventPayload("command_accepted", {
+      command: "start_quiz",
+      commandId: "start-1",
+      serverNow: 1_000
+    })).toBe(false);
     expect(isServerEventPayload("attack_resolved", {
       attackerId: "player-1",
       commandId: "attack-1",
@@ -71,5 +115,20 @@ describe("shared protocol boundaries", () => {
       selectedOptionId: "a",
       cameraPose: [1, 2, 3]
     })).toBe(false);
+    expect(isClientEventPayload("session_ready", {
+      playerId: "player-1",
+      role: "participant"
+    })).toBe(true);
+    expect(isClientEventPayload("session_ready", {
+      playerId: "player-1",
+      role: "participant",
+      sessionId: "private-transport-id"
+    })).toBe(false);
+  });
+
+  it("accepts only the exact session identity request", () => {
+    expect(isSessionRequestPayload({ protocolVersion: 1 })).toBe(true);
+    expect(isSessionRequestPayload({ protocolVersion: 1, playerId: "client-claimed" })).toBe(false);
+    expect(isSessionRequestPayload({ protocolVersion: 999 })).toBe(false);
   });
 });

@@ -63,16 +63,16 @@ export function HomeScreen({ busy, error, onCreateRoom, onJoinRoom, onShowDemo, 
               </Text>
               <Text style={styles.copyLeft}>
                 {step === "participant"
-                  ? "Use the six-digit code shared by your organizer. Your name will appear in the live lobby."
+                  ? "Use the four-digit code shared by your organizer. Your name will appear in the live lobby."
                   : "Choose the name participants will see, then share the generated room code."}
               </Text>
               <Field editable={!busy} label={step === "participant" ? "YOUR NAME" : "ORGANIZER NAME"} maxLength={32} onChangeText={setNickname} placeholder="Enter your name" value={nickname} />
               {step === "participant" ? (
-                <Field editable={!busy} keyboardType="number-pad" label="ROOM CODE" maxLength={6} onChangeText={(value) => setRoomCode(value.replace(/\D/g, ""))} placeholder="482913" value={roomCode} />
+                <Field editable={!busy} keyboardType="number-pad" label="ROOM CODE" maxLength={4} onChangeText={(value) => setRoomCode(value.replace(/\D/g, ""))} placeholder="0427" value={roomCode} />
               ) : null}
               {error ? <Text accessibilityLiveRegion="assertive" style={styles.error}>{error}</Text> : null}
               <ActionButton
-                disabled={busy || !nickname.trim() || (step === "participant" && roomCode.length !== 6)}
+                disabled={busy || !nickname.trim() || (step === "participant" && roomCode.length !== 4)}
                 label={busy ? "Connecting…" : step === "participant" ? "Join War Room  →" : "Create War Room  →"}
                 onPress={() => step === "participant" ? void onJoinRoom(roomCode, nickname) : void onCreateRoom(nickname)}
               />

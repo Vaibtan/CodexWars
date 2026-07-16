@@ -13,7 +13,7 @@ game screens, protocol types, and future AR presentation code remain shared.
 | Node runtime | Node 22.23.1, selected with `nvm use` from the repository root |
 | Native workflow | Expo managed/CNG. Do not hand-edit generated `ios/` or `android/` directories. |
 | App runtime | Uses the `development` build profile because Viro/ARKit/ARCore are native modules; Expo Go cannot load the app. |
-| AR work | Test floor tracking and battle scenes on physical ARKit- and ARCore-capable devices. |
+| AR work | Print `output/pdf/codexwars-arena-marker-a4.pdf` at 100% and test the same marker with physical ARKit- and ARCore-capable devices. |
 
 ## iPhone testing — macOS owner
 
@@ -30,8 +30,8 @@ physical iPhone.
 ## Android testing — Windows teammates
 
 1. Install Node 22, Android Studio, JDK 17, and an Expo account/EAS CLI.
-2. Build a shared Android development client: `eas build --platform android --profile development`.
-3. Install the resulting Android build on each ARCore-capable test phone.
+2. For the locally connected phone, create and install the development client from `apps/mobile` with `npx expo run:android`. For a shared remote build, use `eas build --platform android --profile development`.
+3. Confirm the installed package is `com.codexwars.app`, not Expo Go.
 4. Run `npm run mobile` on the machine hosting Metro. Devices must reach that
 machine over the same LAN/hotspot; use Expo's tunnel option only when LAN is
 unavailable.
@@ -49,3 +49,5 @@ one ARCore-capable Android phone:
 - GLB asset loads and animation plays;
 - marker-relative position and aim produce matching server results;
 - no platform-specific UI/permission or performance regression appears.
+
+Record the exact phones, OS versions, commit, ten acquisition trials, cross-device point agreement, heading error, three-minute drift, stale-pose shutdown, and GLB results in `M0_RESULTS.md`. Do not mark M0 passed from an emulator, a single platform, or a build-only check.
