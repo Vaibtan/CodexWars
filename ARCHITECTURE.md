@@ -13,7 +13,7 @@ Three layers, one hard rule per boundary:
 | Layer | Owns | Hard rule |
 |---|---|---|
 | **AR presentation** (`mobile/src/ar/`) | Marker tracking, coordinate conversion, rendering bundled GLBs/effects in camera space | Only place Viro is imported. Publishes plain 2D data; never touches the network. |
-| **Game client** (`mobile/src/{features,screens,store,lib}`) | UI, local state, Colyseus connection | Never imports Viro types. Treats AR as a sensor behind the `ArSessionState`/`ArPose` contract; only `lib/warRoomClient.ts` imports `@colyseus/sdk`. |
+| **Game client** (`apps/mobile/src/{features,screens,components}`) | UI, local state, Colyseus connection | Never imports Viro types outside `src/ar`. Treats AR as a sensor behind the `ArSceneBridge` contract; only `features/warRoom/realtimeClient.ts` imports `@colyseus/sdk`. |
 | **Authoritative server** (`server/`) | Rooms, phase machine, validation, combat, results | Never knows AR exists. Consumes marker-relative 2D coordinates as opaque numbers. |
 
 All three compile against `packages/shared` (types, protocol, constants, pure game math). The math is written once and executed in two places: the server uses it authoritatively; the client uses the same functions for prediction (crosshair target highlight), which is why predicted and actual results almost always agree.
@@ -56,42 +56,41 @@ A single-node hosted pilot preserves the `WarRoom` and protocol interfaces, but 
 flowchart TB
     subgraph MOBILE["apps/mobile"]
         subgraph AR["ar/ (Viro boundary)"]
-            SESSION["ArenaSession.tsx<br/>marker tracking, GLB/effect rendering"]
+            SESSION["ParticipantArenaArView + SharedArenaScene<br/>retained marker tracking and GLB rendering"]
             COORD["coordinates.ts<br/>pure marker-space math"]
         end
         subgraph CORE["app core"]
-            SCREENS["screens/ (~10, thin)"]
-            SSTORE["store/sessionStore<br/>room mirror, phase, players"]
-            BSTORE["store/battleStore<br/>10Hz aim, predicted target, effect queue"]
-            NET["lib/warRoomClient<br/>@colyseus/sdk adapter<br/>matchmake · sync · messages · reconnect"]
+            APP["App.tsx<br/>screen and room lifecycle"]
+            SCREENS["screens/<br/>participant and organizer overlays"]
+            ROOMHOOK["useWarRoom.ts<br/>validated room snapshot subscription"]
+            NET["features/warRoom/realtimeClient<br/>@colyseus/sdk adapter<br/>matchmake · validate · messages · reconnect"]
             HUD["components/<br/>crosshair, HP bars, fire buttons"]
         end
     end
 
     subgraph SERVER["apps/server"]
         CODES["roomId.ts<br/>unique 4-digit roomId allocation"]
-        ROOM["WarRoom.ts<br/>lifecycle · phase machine · validation"]
-        SCHEMA["schema/<br/>Colyseus synced state"]
-        QUIZ["quiz.ts"]
+        ROOM["rooms/war-room.ts<br/>lifecycle · phase machine · validation"]
+        SCHEMA["rooms/state.ts<br/>Colyseus synced state"]
     end
 
     subgraph SHARED["packages/shared"]
         PROTO["protocol.ts"]
         CONST["constants.ts (all tunables)"]
-        COMBAT["combat.ts · geometry.ts · rewards.ts<br/>(pure functions)"]
+        COMBAT["combat.ts<br/>position, attack, damage, standings"]
+        QUIZ["quiz.ts<br/>bundled template and rewards"]
     end
 
     SESSION --> COORD
-    SESSION -->|"ArPose, ArSessionState"| BSTORE
-    BSTORE -->|"opponent positions to render"| SESSION
-    SCREENS --> SSTORE & BSTORE
-    HUD --> BSTORE
-    SSTORE <--> NET
-    BSTORE -->|attack msgs| NET
+    SESSION -->|"marker pose and aim"| SCREENS
+    SCREENS -->|"actors and phase"| SESSION
+    APP --> SCREENS & ROOMHOOK
+    SCREENS --> HUD & NET
+    ROOMHOOK <--> NET
     NET <-->|"WebSocket"| ROOM
-    ROOM --> SCHEMA & CODES & QUIZ
-    ROOM -->|authoritative| COMBAT
-    BSTORE -->|prediction| COMBAT
+    ROOM --> SCHEMA & CODES
+    ROOM -->|authoritative| COMBAT & QUIZ
+    SCREENS -->|target highlight only| COMBAT
     SHARED -.types.- MOBILE & SERVER
 ```
 
@@ -132,7 +131,7 @@ Organizer/participant roles come only from this server-owned lifecycle. A client
 sequenceDiagram
     participant V as ar/ArenaSession (Viro)
     participant S as stores
-    participant N as warRoomClient adapter
+    participant N as realtimeClient adapter
     participant SRV as WarRoom
 
     Note over V: participant on Marker-scan screen
@@ -160,7 +159,7 @@ sequenceDiagram
 sequenceDiagram
     participant HUD as HUD (fire button)
     participant B as battleStore
-    participant N as warRoomClient adapter
+    participant N as realtimeClient adapter
     participant SRV as WarRoom
     participant ALL as all clients
 

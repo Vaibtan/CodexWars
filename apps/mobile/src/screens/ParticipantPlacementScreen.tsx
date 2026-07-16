@@ -1,25 +1,25 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { deriveBattleLoadout, type WarRoomState } from "@codexwars/shared";
-import { ParticipantPlacementArView } from "../ar/ParticipantPlacementArView";
+import type { PublicRoomState } from "@codexwars/shared";
 import { BattleStatsPanel } from "../components/BattleStatsPanel";
 import { CharacterPreview } from "../components/CharacterPreview";
 import { colors } from "../components/theme";
-import type { ArSceneBridge, ArTrackingState } from "../ar/types";
+import type { ArMarkerTrackingState, ArTrackingState } from "../ar/types";
 import { getCharacter, getCharacterColor } from "../features/characters/characterCatalog";
 import type { ArenaPosition, CharacterSelection } from "../features/characters/types";
-import type { WarRoomSession } from "../features/warRoom/types";
-import { lockPosition } from "../lib/firebase/warRooms";
+import type { WarRoomRealtimeClient } from "../features/warRoom/realtimeClient";
 
 type ParticipantPlacementScreenProps = {
-  correctAnswers: number;
+  client: WarRoomRealtimeClient;
+  markerTracking: ArMarkerTrackingState;
   onBack: () => void;
   onReturnHome: () => void;
   onStartBattle: () => void;
-  room: WarRoomState;
+  position: ArenaPosition | null;
+  room: PublicRoomState;
   selection: CharacterSelection;
-  session: WarRoomSession;
+  tracking: ArTrackingState;
 };
 
 const trackingCopy: Record<ArTrackingState, string> = {
@@ -30,39 +30,42 @@ const trackingCopy: Record<ArTrackingState, string> = {
 };
 
 export function ParticipantPlacementScreen({
-  correctAnswers,
+  client,
+  markerTracking,
   onBack,
   onReturnHome,
   onStartBattle,
+  position,
   room,
   selection,
-  session,
+  tracking,
 }: ParticipantPlacementScreenProps) {
-  const [tracking, setTracking] = useState<ArTrackingState>("initializing");
-  const [position, setPosition] = useState<ArenaPosition | null>(null);
   const [waiting, setWaiting] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const character = getCharacter(selection.characterId);
   const characterColor = getCharacterColor(selection.colorId);
-  const battleLoadout = room.stats[session.uid] ?? deriveBattleLoadout({ correctAnswers, totalQuestions: 10 });
-  const syncedMember = room.members[session.uid];
-
-  const sceneBridge = useMemo<ArSceneBridge>(
-    () => ({
-      characterSelection: selection,
-      onPlacementChanged: setPosition,
-      onTrackingChanged: setTracking,
-    }),
-    [selection],
-  );
+  const player = client.session.playerId === null ? undefined : room.players[client.session.playerId];
 
   useEffect(() => {
     if (room.phase === "battle") onStartBattle();
   }, [onStartBattle, room.phase]);
 
   useEffect(() => {
-    if (syncedMember?.readiness === "waiting") setWaiting(true);
-  }, [syncedMember?.readiness]);
+    if (player?.positionLocked && player.ready) setWaiting(true);
+  }, [player?.positionLocked, player?.ready]);
+
+  useEffect(() => {
+    if (!player || (room.phase !== "localization" && room.phase !== "positioning")) return;
+    const desiredLocalization = markerTracking === "tracked" || markerTracking === "degraded"
+      ? "localized"
+      : markerTracking === "lost"
+        ? "lost"
+        : "searching";
+    if (player.localization === desiredLocalization) return;
+    void client.send({ state: desiredLocalization, type: "localization_changed" }).catch((error: unknown) => {
+      setSyncError(error instanceof Error ? error.message : String(error));
+    });
+  }, [client, markerTracking, player, room.phase]);
 
   const joinBattle = async () => {
     if (!position || tracking !== "normal") {
@@ -70,7 +73,8 @@ export function ParticipantPlacementScreen({
     }
     setSyncError(null);
     try {
-      await lockPosition(session, room, position);
+      await client.send({ position, type: "lock_position" });
+      await client.send({ ready: true, type: "ready_changed" });
     } catch (error) {
       setSyncError(error instanceof Error ? error.message : String(error));
     }
@@ -78,9 +82,7 @@ export function ParticipantPlacementScreen({
 
   if (waiting) {
     return (
-      <View style={styles.screen}>
-        <ParticipantPlacementArView bridge={sceneBridge} selection={selection} />
-        <SafeAreaView edges={["top", "bottom"]} style={[styles.waitingScreen, styles.waitingOverlay]}>
+      <SafeAreaView edges={["top", "bottom"]} style={[styles.waitingScreen, styles.waitingOverlay]}>
         <ScrollView contentContainerStyle={styles.waitingContent} showsVerticalScrollIndicator={false}>
           <View style={styles.waitingTop}>
             <View style={styles.readyPill}>
@@ -93,7 +95,7 @@ export function ParticipantPlacementScreen({
             </Text>
           </View>
 
-          <BattleStatsPanel battleStats={battleLoadout} label="Quiz powers ready" showAbilities />
+          {player ? <BattleStatsPanel label="Quiz powers ready" player={player} /> : null}
 
           <View style={styles.waitingCharacterRow}>
             <CharacterPreview characterId={selection.characterId} colorId={selection.colorId} />
@@ -119,21 +121,20 @@ export function ParticipantPlacementScreen({
             </Pressable>
           </View>
         </ScrollView>
-        </SafeAreaView>
-      </View>
+      </SafeAreaView>
     );
   }
 
-  const selectionSynced = syncedMember?.selection?.characterId === selection.characterId
-    && syncedMember.selection.colorId === selection.colorId;
+  const selectionSynced = player?.characterId === selection.characterId
+    && player.characterColorId === selection.colorId;
   const canJoin = Boolean(position)
     && tracking === "normal"
+    && markerTracking === "tracked"
     && selectionSynced
-    && room.arena.status === "ready";
+    && room.arena.configured
+    && room.phase === "positioning";
 
   return (
-    <View style={styles.screen}>
-      <ParticipantPlacementArView bridge={sceneBridge} selection={selection} />
       <SafeAreaView edges={["top", "bottom"]} pointerEvents="box-none" style={styles.overlay}>
         <View pointerEvents="box-none" style={styles.topBar}>
           <Pressable
@@ -146,7 +147,9 @@ export function ParticipantPlacementScreen({
           </Pressable>
           <View style={styles.trackingPill}>
             <View style={[styles.trackingDot, tracking === "normal" && styles.trackingDotReady]} />
-            <Text numberOfLines={1} style={styles.trackingText}>{trackingCopy[tracking]}</Text>
+            <Text numberOfLines={1} style={styles.trackingText}>
+              {markerTracking === "tracked" ? "Arena marker locked" : markerTracking === "degraded" ? "Marker pose retained" : markerTracking === "lost" ? "Marker lost · scan again" : trackingCopy[tracking]}
+            </Text>
           </View>
           <Text style={styles.stepPill}>2 of 2</Text>
         </View>
@@ -163,11 +166,11 @@ export function ParticipantPlacementScreen({
                 <CharacterPreview characterId={selection.characterId} colorId={selection.colorId} compact />
               </View>
               <View style={styles.placementCopy}>
-                <Text style={styles.placementTitle}>{position ? "Position selected" : "Place your character"}</Text>
+                <Text style={styles.placementTitle}>{position ? "Standing position found" : "Find the arena marker"}</Text>
                 <Text style={styles.placementInstructions}>
                   {position
-                    ? "Tap another clear floor spot to adjust. Join only when you are standing safely."
-                    : "Stand at your play spot, then tap the clear floor where your character should be locked."}
+                    ? "Stand still at this safe spot. The coordinates below come from your camera relative to the printed marker."
+                    : "Point at the printed marker, then stand at your play spot while keeping the AR session open."}
                 </Text>
               </View>
             </View>
@@ -176,7 +179,7 @@ export function ParticipantPlacementScreen({
               <Text style={styles.safetyText}>Keep 1.5 m from others · feet planted during battle</Text>
             </View>
             <Pressable
-              accessibilityHint={canJoin ? "Locks your position and marks you waiting" : "Select a floor position first"}
+              accessibilityHint={canJoin ? "Locks your marker-relative standing position and marks you waiting" : "Scan the marker from a safe standing position first"}
               accessibilityRole="button"
               accessibilityState={{ disabled: !canJoin }}
               disabled={!canJoin}
@@ -188,14 +191,13 @@ export function ParticipantPlacementScreen({
               ]}
             >
               <Text style={[styles.joinText, !canJoin && styles.joinTextDisabled]}>
-                {position ? "Lock position and join battle" : "Tap floor to choose position"}
+                {room.phase === "localization" ? "Waiting for arena positioning…" : position ? "Lock this standing position" : "Scan marker to locate your position"}
               </Text>
             </Pressable>
             {syncError ? <Text accessibilityLiveRegion="assertive" style={styles.syncError}>{syncError}</Text> : null}
           </View>
         </View>
       </SafeAreaView>
-    </View>
   );
 }
 

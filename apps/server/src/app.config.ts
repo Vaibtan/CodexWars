@@ -1,4 +1,4 @@
-import { defineRoom, defineServer } from "colyseus";
+import { defineRoom, defineServer } from "@colyseus/core";
 import { registerOperationalRoutes, type OperationalApplication } from "./operational.js";
 import { WarRoom } from "./rooms/war-room.js";
 

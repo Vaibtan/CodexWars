@@ -1,17 +1,17 @@
-import type { WarRoomState } from "@codexwars/shared";
+import type { PublicRoomState } from "@codexwars/shared";
 
 export type WarRoomRole = "organizer" | "participant";
 
 export interface WarRoomSession {
   nickname: string;
+  playerId: string | null;
   role: WarRoomRole;
   roomId: string;
-  uid: string;
 }
 
 export interface WarRoomSubscriptionState {
   connected: boolean;
   error: Error | null;
   loading: boolean;
-  room: WarRoomState | null;
+  room: PublicRoomState | null;
 }

@@ -1,6 +1,6 @@
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import type { WarRoomState } from "@codexwars/shared";
+import type { PublicRoomState } from "@codexwars/shared";
 import { CharacterPreview } from "../components/CharacterPreview";
 import { colors } from "../components/theme";
 import type { CharacterSelection } from "../features/characters/types";
@@ -9,7 +9,7 @@ type BattleResultsScreenProps = {
   onDone: () => void;
   onRunAnotherRound?: () => void;
   role: "organizer" | "participant";
-  room?: WarRoomState | null;
+  room?: PublicRoomState | null;
   selection?: CharacterSelection;
 };
 
@@ -21,12 +21,12 @@ const standings = [
 
 export function BattleResultsScreen({ onDone, onRunAnotherRound, role, room, selection }: BattleResultsScreenProps) {
   const syncedStandings = room
-    ? room.results
-      ? Object.values(room.results.standings)
+    ? room.battle.standings.length > 0
+      ? [...room.battle.standings]
         .sort((a, b) => a.rank - b.rank)
-        .map((standing) => ({ hp: standing.hp, name: standing.nickname, place: standing.rank }))
-      : Object.values(room.members)
-        .map((member) => ({ hp: room.stats[member.id]?.hp ?? 0, name: member.nickname }))
+        .map((standing) => ({ hp: standing.hp, name: standing.displayName, place: standing.rank }))
+      : Object.values(room.players)
+        .map((player) => ({ hp: player.hp, name: player.displayName }))
         .sort((a, b) => b.hp - a.hp)
         .map((participant, index) => ({ ...participant, place: index + 1 }))
     : standings;
@@ -37,7 +37,7 @@ export function BattleResultsScreen({ onDone, onRunAnotherRound, role, room, sel
         <View style={styles.resultMark}><Text style={styles.resultMarkText}>✦</Text></View>
         <Text accessibilityRole="header" style={styles.title}>Battle complete</Text>
         <Text style={styles.subtitle}>{role === "organizer" ? `${winner} wins the arena` : `Winner · ${winner}`}</Text>
-        <Text style={styles.detail}>Final standings are frozen from the authoritative Firebase Battle Snapshot. The complete action history remains in Battle Events.</Text>
+        <Text style={styles.detail}>Final standings are frozen from the authoritative Colyseus room state calculated by the game server.</Text>
 
         {selection ? (
           <View style={styles.characterWrap}>

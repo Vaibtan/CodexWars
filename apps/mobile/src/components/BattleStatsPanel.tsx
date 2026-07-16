@@ -1,90 +1,61 @@
 import { StyleSheet, Text, View } from "react-native";
-import type { BattleLoadout } from "@codexwars/shared";
+import { QUIZ, WEAPONS, startingShieldForScore, type PlayerPublicState } from "@codexwars/shared";
 import { colors } from "./theme";
 
 type BattleStatsPanelProps = {
-  battleStats: BattleLoadout;
   label?: string;
-  showAbilities?: boolean;
+  player: PlayerPublicState;
 };
 
-export function BattleStatsPanel({
-  battleStats,
-  label = "Your battle stats",
-  showAbilities = false,
-}: BattleStatsPanelProps) {
-  const hpPercent = Math.round((battleStats.hp / battleStats.maxHp) * 100);
-  const shieldPercent = battleStats.maxShield
-    ? Math.round((battleStats.shield / battleStats.maxShield) * 100)
-    : 0;
-  const fireball = battleStats.weapons.fireball;
+const maximumQuizShield = startingShieldForScore(QUIZ.QUESTION_COUNT);
+
+export function BattleStatsPanel({ label = "Your battle stats", player }: BattleStatsPanelProps) {
+  const hpPercent = Math.round((player.hp / player.maxHp) * 100);
+  const shieldPercent = Math.round((player.shield / maximumQuizShield) * 100);
 
   return (
     <View style={styles.panel}>
       <View style={styles.headingRow}>
         <View style={styles.headingCopy}>
           <Text style={styles.label}>{label}</Text>
-          <Text style={styles.effectiveHealth}>{battleStats.effectiveHealth} effective HP</Text>
+          <Text style={styles.effectiveHealth}>{player.hp + player.shield} effective HP</Text>
         </View>
         <View style={styles.quizBadge}>
-          <Text style={styles.quizBadgeValue}>{battleStats.correctAnswers}/{battleStats.totalQuestions}</Text>
+          <Text style={styles.quizBadgeValue}>{player.correctAnswers}/{QUIZ.QUESTION_COUNT}</Text>
           <Text style={styles.quizBadgeLabel}>correct</Text>
         </View>
       </View>
 
       <View style={styles.statRow}>
         <Text style={styles.statName}>Health</Text>
-        <Text style={styles.statValue}>{battleStats.hp} / {battleStats.maxHp}</Text>
+        <Text style={styles.statValue}>{player.hp} / {player.maxHp}</Text>
       </View>
-      <View
-        accessibilityRole="progressbar"
-        accessibilityValue={{ max: battleStats.maxHp, min: 0, now: battleStats.hp }}
-        style={styles.track}
-      >
+      <View accessibilityRole="progressbar" accessibilityValue={{ max: player.maxHp, min: 0, now: player.hp }} style={styles.track}>
         <View style={[styles.healthFill, { width: `${hpPercent}%` }]} />
       </View>
 
       <View style={styles.statRow}>
-        <Text style={styles.statName}>Shield</Text>
-        <Text style={styles.statValue}>{battleStats.shield} / {battleStats.maxShield}</Text>
+        <Text style={styles.statName}>Quiz shield</Text>
+        <Text style={styles.statValue}>{player.shield}</Text>
       </View>
-      <View
-        accessibilityRole="progressbar"
-        accessibilityValue={{ max: Math.max(1, battleStats.maxShield), min: 0, now: battleStats.shield }}
-        style={styles.track}
-      >
+      <View accessibilityRole="progressbar" accessibilityValue={{ max: maximumQuizShield, min: 0, now: player.shield }} style={styles.track}>
         <View style={[styles.shieldFill, { width: `${shieldPercent}%` }]} />
       </View>
 
       <View style={styles.weaponRow}>
         <View style={styles.weaponStat}>
-          <Text style={styles.weaponValue}>{battleStats.weapons.bolt.damage}</Text>
+          <Text style={styles.weaponValue}>{WEAPONS.bolt.damage}</Text>
           <Text style={styles.weaponLabel}>bolt damage</Text>
         </View>
         <View style={styles.weaponStat}>
-          <Text style={styles.weaponValue}>{fireball.unlocked ? fireball.charges : "—"}</Text>
-          <Text style={styles.weaponLabel}>fireballs</Text>
+          <Text style={styles.weaponValue}>Unlimited</Text>
+          <Text style={styles.weaponLabel}>bolt charges</Text>
         </View>
         <View style={styles.weaponStat}>
-          <Text style={styles.weaponValue}>{battleStats.weapons.bolt.cooldownMs} ms</Text>
+          <Text style={styles.weaponValue}>{WEAPONS.bolt.cooldownMs} ms</Text>
           <Text style={styles.weaponLabel}>bolt cooldown</Text>
         </View>
       </View>
-
-      {showAbilities && battleStats.abilities.length ? (
-        <View style={styles.abilities}>
-          <Text style={styles.abilitiesTitle}>Earned abilities</Text>
-          {battleStats.abilities.map((ability) => (
-            <View key={ability.id} style={styles.abilityRow}>
-              <View style={styles.abilityDot} />
-              <View style={styles.abilityCopy}>
-                <Text style={styles.abilityName}>{ability.label}</Text>
-                <Text style={styles.abilityDetail}>{ability.description}</Text>
-              </View>
-            </View>
-          ))}
-        </View>
-      ) : null}
     </View>
   );
 }
@@ -108,11 +79,4 @@ const styles = StyleSheet.create({
   weaponStat: { backgroundColor: colors.surface, borderRadius: 10, flex: 1, minHeight: 58, paddingHorizontal: 8, paddingVertical: 9 },
   weaponValue: { color: colors.ink, fontSize: 14, fontWeight: "900" },
   weaponLabel: { color: colors.inkSubtle, fontSize: 9, lineHeight: 12, marginTop: 3 },
-  abilities: { borderTopColor: colors.outline, borderTopWidth: 1, marginTop: 14, paddingTop: 12 },
-  abilitiesTitle: { color: colors.ink, fontSize: 13, fontWeight: "900", marginBottom: 4 },
-  abilityRow: { alignItems: "flex-start", flexDirection: "row", gap: 9, paddingVertical: 5 },
-  abilityDot: { backgroundColor: colors.accent, borderRadius: 4, height: 8, marginTop: 5, width: 8 },
-  abilityCopy: { flex: 1 },
-  abilityName: { color: colors.ink, fontSize: 12, fontWeight: "800" },
-  abilityDetail: { color: colors.inkSubtle, fontSize: 10, lineHeight: 14, marginTop: 1 },
 });

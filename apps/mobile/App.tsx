@@ -3,19 +3,19 @@ import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ArDemoScreen } from "./src/ar/ArDemoScreen";
 import type { CharacterSelection } from "./src/features/characters/types";
-import type { WarRoomSession } from "./src/features/warRoom/types";
+import {
+  createOrganizerWarRoom,
+  joinParticipantWarRoom,
+  type WarRoomRealtimeClient,
+} from "./src/features/warRoom/realtimeClient";
 import { useWarRoom } from "./src/features/warRoom/useWarRoom";
-import { ensureAnonymousFirebaseUser } from "./src/lib/firebase/client";
-import { createWarRoom, joinWarRoom, selectCharacter } from "./src/lib/firebase/warRooms";
 import { CharacterCustomizationScreen } from "./src/screens/CharacterCustomizationScreen";
 import { BattleResultsScreen } from "./src/screens/BattleResultsScreen";
 import { ArCharacterTestScreen } from "./src/screens/ArCharacterTestScreen";
 import { DemoStoryScreen } from "./src/screens/DemoStoryScreen";
 import { HomeScreen } from "./src/screens/HomeScreen";
 import { OrganizerDashboardScreen } from "./src/screens/OrganizerDashboardScreen";
-import { ParticipantBattleScreen } from "./src/screens/ParticipantBattleScreen";
-import { ParticipantArenaWaitingScreen } from "./src/screens/ParticipantArenaWaitingScreen";
-import { ParticipantPlacementScreen } from "./src/screens/ParticipantPlacementScreen";
+import { ParticipantArenaScreen } from "./src/screens/ParticipantArenaScreen";
 import { ParticipantQuizResultsScreen } from "./src/screens/ParticipantQuizResultsScreen";
 import { ParticipantQuizScreen } from "./src/screens/ParticipantQuizScreen";
 import { QuizWaitingScreen } from "./src/screens/QuizWaitingScreen";
@@ -30,7 +30,6 @@ type AppScreen =
   | "participant-quiz-results"
   | "ar-demo"
   | "character-customization"
-  | "participant-arena-waiting"
   | "participant-placement"
   | "participant-battle"
   | "organizer-results"
@@ -40,57 +39,50 @@ const initialSelection: CharacterSelection = {
   characterId: "knight",
   colorId: "gold",
 };
-const demoCorrectAnswers = 7;
 
 export default function App() {
   const [screen, setScreen] = useState<AppScreen>("home");
   const [selection, setSelection] = useState<CharacterSelection>(initialSelection);
-  const [session, setSession] = useState<WarRoomSession | null>(null);
+  const [client, setClient] = useState<WarRoomRealtimeClient | null>(null);
   const [connectionBusy, setConnectionBusy] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
-  const warRoom = useWarRoom(session);
-  const localMember = session?.role === "participant" ? warRoom.room?.members[session.uid] : null;
-  const correctAnswers = localMember?.correctAnswers ?? demoCorrectAnswers;
+  const warRoom = useWarRoom(client);
+  const session = client?.session ?? null;
+  const localPlayer = session?.playerId ? warRoom.room?.players[session.playerId] : undefined;
 
   useEffect(() => {
-    ensureAnonymousFirebaseUser().catch((error: unknown) => {
-      console.warn("Firebase anonymous sign-in is unavailable", error);
-    });
-  }, []);
-
-  useEffect(() => {
-    if (!session || !warRoom.room) return;
-    if (session.role === "participant" && warRoom.room.phase === "quiz" && screen === "quiz-waiting") {
+    const room = warRoom.room;
+    if (!session || !room) return;
+    if (session.role === "participant" && room.phase === "quiz" && screen === "quiz-waiting") {
       setScreen("participant-quiz");
     }
-    if (session.role === "participant" && warRoom.room.phase === "quiz-results" && ["quiz-waiting", "participant-quiz"].includes(screen)) {
+    if (session.role === "participant" && room.phase === "localization" && screen === "participant-quiz") {
       setScreen("participant-quiz-results");
     }
-    if (session.role === "organizer" && warRoom.room.phase === "arena-setup" && screen === "organizer-dashboard") {
+    if (session.role === "organizer" && room.phase === "localization" && screen === "organizer-dashboard") {
       setScreen("ar-demo");
     }
-    if (session.role === "participant" && warRoom.room.phase === "positioning" && screen === "participant-arena-waiting") {
-      setScreen("participant-placement");
-    }
-    if (session.role === "participant" && warRoom.room.phase === "battle" && screen === "participant-placement") {
+    if (session.role === "participant" && (room.phase === "countdown" || room.phase === "battle") && screen === "participant-placement") {
       setScreen("participant-battle");
     }
-    if (warRoom.room.phase === "results" && screen === "participant-battle") setScreen("participant-results");
-    if (warRoom.room.phase === "results" && screen === "ar-demo") setScreen("organizer-results");
-  }, [localMember?.quizCompleted, screen, session, warRoom.room]);
+    if (room.phase === "results" && screen === "participant-battle") setScreen("participant-results");
+    if (room.phase === "results" && screen === "ar-demo") setScreen("organizer-results");
+  }, [screen, session, warRoom.room]);
 
   const leaveRoom = () => {
-    setSession(null);
+    const activeClient = client;
+    setClient(null);
     setConnectionError(null);
     setScreen("home");
+    if (activeClient) void activeClient.dispose();
   };
 
   const handleCreateRoom = async (nickname: string) => {
     setConnectionBusy(true);
     setConnectionError(null);
     try {
-      const nextSession = await createWarRoom(nickname);
-      setSession(nextSession);
+      const nextClient = await createOrganizerWarRoom(nickname);
+      setClient(nextClient);
       setScreen("organizer-dashboard");
     } catch (error) {
       setConnectionError(error instanceof Error ? error.message : String(error));
@@ -103,8 +95,8 @@ export default function App() {
     setConnectionBusy(true);
     setConnectionError(null);
     try {
-      const nextSession = await joinWarRoom(roomCode, nickname);
-      setSession(nextSession);
+      const nextClient = await joinParticipantWarRoom(roomCode, nickname);
+      setClient(nextClient);
       setScreen("quiz-waiting");
     } catch (error) {
       setConnectionError(error instanceof Error ? error.message : String(error));
@@ -128,80 +120,67 @@ export default function App() {
       )}
       {screen === "demo-story" && <DemoStoryScreen onDone={() => setScreen("home")} />}
       {screen === "ar-character-test" && <ArCharacterTestScreen onDone={() => setScreen("home")} />}
-      {screen === "organizer-dashboard" && session && warRoom.room && (
-        <OrganizerDashboardScreen connected={warRoom.connected} onLeave={leaveRoom} room={warRoom.room} session={session} />
+      {screen === "organizer-dashboard" && client && warRoom.room && (
+        <OrganizerDashboardScreen client={client} connected={warRoom.connected} onLeave={leaveRoom} room={warRoom.room} />
       )}
       {screen === "quiz-waiting" && session && (
         <QuizWaitingScreen connected={warRoom.connected} onLeave={leaveRoom} room={warRoom.room} session={session} />
       )}
-      {screen === "participant-quiz" && session && warRoom.room && (
-        <ParticipantQuizScreen onLeave={leaveRoom} room={warRoom.room} session={session} />
+      {screen === "participant-quiz" && client && warRoom.room && (
+        <ParticipantQuizScreen client={client} onLeave={leaveRoom} room={warRoom.room} />
       )}
-      {screen === "participant-quiz-results" && session && warRoom.room && (
+      {screen === "participant-quiz-results" && session?.playerId && warRoom.room && (
         <ParticipantQuizResultsScreen
           onContinue={() => {
-            setSelection(localMember?.selection ?? initialSelection);
+            if (localPlayer?.characterId && localPlayer.characterId !== "default") {
+              setSelection({ characterId: localPlayer.characterId, colorId: localPlayer.characterColorId });
+            }
             setScreen("character-customization");
           }}
           onLeave={leaveRoom}
-          participantId={session.uid}
+          participantId={session.playerId}
           room={warRoom.room}
         />
       )}
-      {screen === "character-customization" && session && warRoom.room && (
+      {screen === "character-customization" && client && warRoom.room && (
         <CharacterCustomizationScreen
-          onBack={() => setScreen("quiz-waiting")}
+          onBack={() => setScreen("participant-quiz-results")}
           onNext={(nextSelection) => {
-            void selectCharacter(session, warRoom.room!, nextSelection);
-            setScreen(warRoom.room?.phase === "positioning" ? "participant-placement" : "participant-arena-waiting");
-          }}
-          onSelectionChange={(nextSelection) => {
             setSelection(nextSelection);
-            void selectCharacter(session, warRoom.room!, nextSelection).catch((error: unknown) => setConnectionError(error instanceof Error ? error.message : String(error)));
+            void client.send({ selection: nextSelection, type: "select_character" })
+              .then(() => setScreen("participant-placement"))
+              .catch((error: unknown) => setConnectionError(error instanceof Error ? error.message : String(error)));
           }}
+          onSelectionChange={setSelection}
           selection={selection}
         />
       )}
-      {screen === "participant-arena-waiting" && warRoom.room && (
-        <ParticipantArenaWaitingScreen
-          connected={warRoom.connected}
-          onChangeCharacter={() => setScreen("character-customization")}
-          onLeave={leaveRoom}
-          room={warRoom.room}
-          selection={selection}
-        />
-      )}
-      {screen === "participant-placement" && session && warRoom.room && (
-        <ParticipantPlacementScreen
-          correctAnswers={correctAnswers}
+      {(screen === "participant-placement" || screen === "participant-battle") && client && warRoom.room && (
+        <ParticipantArenaScreen
+          client={client}
+          mode={screen === "participant-battle" ? "battle" : "positioning"}
           onBack={() => setScreen("character-customization")}
+          onBattleComplete={() => setScreen("participant-results")}
           onReturnHome={leaveRoom}
           onStartBattle={() => setScreen("participant-battle")}
           room={warRoom.room}
           selection={selection}
-          session={session}
         />
       )}
-      {screen === "participant-battle" && session && warRoom.room && (
-        <ParticipantBattleScreen
-          correctAnswers={correctAnswers}
-          onBattleComplete={() => setScreen("participant-results")}
-          room={warRoom.room}
-          selection={selection}
-          session={session}
-        />
-      )}
-      {screen === "ar-demo" && session && warRoom.room && (
+      {screen === "ar-demo" && client && warRoom.room && (
         <ArDemoScreen
+          client={client}
           onBattleComplete={() => setScreen("organizer-results")}
           onExit={leaveRoom}
           room={warRoom.room}
-          session={session}
         />
       )}
       {screen === "organizer-results" && (
         <BattleResultsScreen
           onDone={leaveRoom}
+          onRunAnotherRound={client && warRoom.room ? () => {
+            void client.send({ type: "reset_round" }).then(() => setScreen("organizer-dashboard"));
+          } : undefined}
           role="organizer"
           room={warRoom.room}
         />

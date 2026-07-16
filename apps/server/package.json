@@ -5,16 +5,16 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "seed:quiz": "tsx src/quiz/seedProgrammingFundamentals.ts",
     "start": "tsx src/index.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@codexwars/shared": "0.1.0",
+    "@colyseus/core": "0.17.44",
     "@colyseus/schema": "4.0.27",
-    "colyseus": "0.17.10",
-    "firebase-admin": "14.1.0"
+    "@colyseus/ws-transport": "0.17.13",
+    "express": "5.2.1"
   },
   "devDependencies": {
     "@colyseus/sdk": "0.17.43",

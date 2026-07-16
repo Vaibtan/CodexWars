@@ -1,5 +1,5 @@
-import { MAX_COMMAND_BYTES, PROTOCOL_VERSION } from "./constants.js";
-import type { CommandId, ErrorCode, PlayerId, RoundId, Standing } from "./types.js";
+import { CHARACTER_COLOR_IDS, CHARACTER_IDS, MAX_COMMAND_BYTES, PROTOCOL_VERSION } from "./constants.js";
+import type { BattleStatus, CharacterColorId, CharacterId, CommandId, ErrorCode, LocalizationState, PlayerId, ProtocolVersion, PublicQuizQuestion, QuizStatus, RoomId, RoomPhase, RoundId, Standing } from "./types.js";
 
 export interface CommandMeta {
   readonly commandId: CommandId;
@@ -13,6 +13,7 @@ export type CommandName =
   | "lock_position"
   | "ready_changed"
   | "reset_round"
+  | "select_character"
   | "select_quiz_template"
   | "set_combat_included"
   | "start_battle"
@@ -27,6 +28,7 @@ export type ValidatedCommand =
   | (CommandMeta & { readonly command: "start_quiz" })
   | (CommandMeta & { readonly command: "start_battle" })
   | (CommandMeta & { readonly command: "reset_round" })
+  | (CommandMeta & { readonly characterId: CharacterId; readonly colorId: CharacterColorId; readonly command: "select_character" })
   | (CommandMeta & { readonly command: "quiz_answer"; readonly optionId: string; readonly questionId: string })
   | (CommandMeta & { readonly command: "localization_changed"; readonly state: "searching" | "localized" | "lost" })
   | (CommandMeta & { readonly command: "lock_position"; readonly x: number; readonly z: number })
@@ -82,6 +84,12 @@ export function parseCommand(name: CommandName, payload: unknown): RuntimeParseR
     case "reset_round":
     case "unlock_position":
       return only([]) ? { ok: true, value: { ...base, command: name } } as RuntimeParseResult : { code: "POSITION_INVALID", ok: false };
+    case "select_character":
+      return only(["characterId", "colorId"])
+        && isOneOf(payload.characterId, CHARACTER_IDS)
+        && isOneOf(payload.colorId, CHARACTER_COLOR_IDS)
+        ? { ok: true, value: { ...base, characterId: payload.characterId, colorId: payload.colorId, command: name } }
+        : { code: "POSITION_INVALID", ok: false };
     case "quiz_answer":
       return only(["questionId", "optionId"]) && typeof payload.questionId === "string" && typeof payload.optionId === "string"
         ? { ok: true, value: { ...base, command: name, optionId: payload.optionId, questionId: payload.questionId } }
@@ -107,6 +115,16 @@ export function parseCommand(name: CommandName, payload: unknown): RuntimeParseR
 
 export function isSupportedProtocolVersion(value: unknown): value is typeof PROTOCOL_VERSION {
   return value === PROTOCOL_VERSION;
+}
+
+export interface SessionRequestPayload {
+  readonly protocolVersion: typeof PROTOCOL_VERSION;
+}
+
+export function isSessionRequestPayload(value: unknown): value is SessionRequestPayload {
+  return isRecord(value)
+    && hasExactKeys(value, ["protocolVersion"])
+    && isSupportedProtocolVersion(value.protocolVersion);
 }
 
 export interface ServerEventPayloads {
@@ -143,10 +161,11 @@ export function isServerEventPayload<Name extends ServerEventName>(name: Name, v
 }
 
 export interface PrivateEventPayloads {
-  readonly command_accepted: { readonly command: CommandName; readonly commandId: CommandId; readonly serverNow: number };
+  readonly command_accepted: { readonly command: CommandName; readonly commandId: CommandId; readonly roundId: RoundId; readonly serverNow: number };
   readonly quiz_answer_accepted: { readonly acceptedAt: number; readonly commandId: CommandId; readonly questionId: string; readonly roundId: RoundId };
   readonly quiz_answer_result: { readonly correct: boolean; readonly questionId: string; readonly roundId: RoundId; readonly runningCorrectAnswers: number; readonly selectedOptionId?: string };
   readonly quiz_completed: { readonly correctAnswers: number; readonly questionCount: number; readonly roundId: RoundId; readonly startingShield: number };
+  readonly session_ready: { readonly playerId: PlayerId | null; readonly role: "organizer" | "participant" };
 }
 
 export type PrivateEventName = keyof PrivateEventPayloads;
@@ -155,13 +174,16 @@ export function isPrivateEventPayload<Name extends PrivateEventName>(name: Name,
   if (!isRecord(value)) return false;
   switch (name) {
     case "command_accepted":
-      return hasExactKeys(value, ["command", "commandId", "serverNow"]) && isOneOf(value.command, ["attack", "configure_arena", "localization_changed", "lock_position", "ready_changed", "reset_round", "select_quiz_template", "set_combat_included", "start_battle", "start_quiz", "unlock_position", "quiz_answer"]) && typeof value.commandId === "string" && finite(value.serverNow);
+      return hasExactKeys(value, ["command", "commandId", "roundId", "serverNow"]) && isOneOf(value.command, ["attack", "configure_arena", "localization_changed", "lock_position", "ready_changed", "reset_round", "select_character", "select_quiz_template", "set_combat_included", "start_battle", "start_quiz", "unlock_position", "quiz_answer"]) && typeof value.commandId === "string" && isPositiveInteger(value.roundId) && finite(value.serverNow);
     case "quiz_answer_accepted":
       return hasExactKeys(value, ["acceptedAt", "commandId", "questionId", "roundId"]) && finite(value.acceptedAt) && typeof value.commandId === "string" && typeof value.questionId === "string" && isPositiveInteger(value.roundId);
     case "quiz_answer_result":
       return (hasExactKeys(value, ["correct", "questionId", "roundId", "runningCorrectAnswers"]) || hasExactKeys(value, ["correct", "questionId", "roundId", "runningCorrectAnswers", "selectedOptionId"])) && isBoolean(value.correct) && typeof value.questionId === "string" && isPositiveInteger(value.roundId) && isNonNegativeInteger(value.runningCorrectAnswers) && (value.selectedOptionId === undefined || typeof value.selectedOptionId === "string");
     case "quiz_completed":
       return hasExactKeys(value, ["correctAnswers", "questionCount", "roundId", "startingShield"]) && isNonNegativeInteger(value.correctAnswers) && isNonNegativeInteger(value.questionCount) && isPositiveInteger(value.roundId) && isNonNegativeInteger(value.startingShield);
+    case "session_ready":
+      return hasExactKeys(value, ["playerId", "role"])
+        && ((value.role === "organizer" && value.playerId === null) || (value.role === "participant" && typeof value.playerId === "string"));
   }
 }
 
@@ -213,14 +235,91 @@ function isOneOf<Value extends string>(value: unknown, values: readonly Value[])
   return typeof value === "string" && values.includes(value as Value);
 }
 
-function isOrganizerProjection(value: unknown): boolean {
+export type PublicRoomPhase = Exclude<RoomPhase, "arena-setup" | "quiz-results">;
+
+export interface OrganizerPublicState {
+  readonly connected: boolean;
+  readonly displayName: string;
+}
+
+export interface PlayerPublicState {
+  readonly characterColorId: CharacterColorId;
+  readonly characterId: CharacterId;
+  readonly charges: -1;
+  readonly combatIncluded: boolean;
+  readonly connected: boolean;
+  readonly correctAnswers: number;
+  readonly disconnectedAt: number;
+  readonly displayName: string;
+  readonly eliminated: boolean;
+  readonly hasAnsweredCurrent: boolean;
+  readonly hp: number;
+  readonly localization: LocalizationState;
+  readonly maxHp: number;
+  readonly nextAttackAt: number;
+  readonly playerId: PlayerId;
+  readonly positionLocked: boolean;
+  readonly positionX: number;
+  readonly positionZ: number;
+  readonly quizCompleted: boolean;
+  readonly ready: boolean;
+  readonly shield: number;
+  readonly weaponId: "bolt";
+}
+
+export interface ArenaPublicState {
+  readonly configured: boolean;
+  readonly markerExclusionRadiusM: number;
+  readonly minimumSpacingM: number;
+  readonly radiusM: number;
+}
+
+export interface QuizPublicState {
+  readonly currentQuestion: Omit<PublicQuizQuestion, "difficulty"> & { readonly difficulty: PublicQuizQuestion["difficulty"] | "" };
+  readonly eligibleCount: number;
+  readonly questionCount: number;
+  readonly questionEndsAt: number;
+  readonly questionIndex: number;
+  readonly revealEndsAt: number;
+  readonly revealedCorrectOptionId: string;
+  readonly revealedExplanation: string;
+  readonly status: Exclude<QuizStatus, "unconfigured">;
+  readonly submittedCount: number;
+  readonly templateId: "programming-fundamentals-v1";
+}
+
+export interface BattlePublicState {
+  readonly completionReason: "" | "last_alive" | "timer";
+  readonly endsAt: number;
+  readonly standings: readonly Standing[];
+  readonly startsAt: number;
+  readonly status: BattleStatus;
+  readonly winnerId: PlayerId | "";
+}
+
+export interface PublicRoomState {
+  readonly arena: ArenaPublicState;
+  readonly battle: BattlePublicState;
+  readonly eventSequence: number;
+  readonly organizer: OrganizerPublicState;
+  readonly phase: PublicRoomPhase;
+  readonly players: Readonly<Record<PlayerId, PlayerPublicState>>;
+  readonly protocolVersion: ProtocolVersion;
+  readonly quiz: QuizPublicState;
+  readonly roomId: RoomId;
+  readonly roundId: RoundId;
+  readonly serverNow: number;
+}
+
+function isOrganizerProjection(value: unknown): value is OrganizerPublicState {
   return isRecord(value) && hasExactKeys(value, ["connected", "displayName"]) && isBoolean(value.connected) && typeof value.displayName === "string";
 }
 
-function isPlayerProjection(value: unknown): boolean {
+function isPlayerProjection(value: unknown): value is PlayerPublicState {
   return isRecord(value)
-    && hasExactKeys(value, ["characterId", "charges", "combatIncluded", "connected", "correctAnswers", "disconnectedAt", "displayName", "eliminated", "hasAnsweredCurrent", "hp", "localization", "maxHp", "nextAttackAt", "playerId", "positionLocked", "positionX", "positionZ", "quizCompleted", "ready", "shield", "weaponId"])
-    && typeof value.characterId === "string"
+    && hasExactKeys(value, ["characterColorId", "characterId", "charges", "combatIncluded", "connected", "correctAnswers", "disconnectedAt", "displayName", "eliminated", "hasAnsweredCurrent", "hp", "localization", "maxHp", "nextAttackAt", "playerId", "positionLocked", "positionX", "positionZ", "quizCompleted", "ready", "shield", "weaponId"])
+    && isOneOf(value.characterColorId, CHARACTER_COLOR_IDS)
+    && isOneOf(value.characterId, CHARACTER_IDS)
     && value.charges === -1
     && isBoolean(value.combatIncluded)
     && isBoolean(value.connected)
@@ -243,7 +342,7 @@ function isPlayerProjection(value: unknown): boolean {
     && value.weaponId === "bolt";
 }
 
-function isArenaProjection(value: unknown): boolean {
+function isArenaProjection(value: unknown): value is ArenaPublicState {
   return isRecord(value)
     && hasExactKeys(value, ["configured", "markerExclusionRadiusM", "minimumSpacingM", "radiusM"])
     && isBoolean(value.configured)
@@ -252,7 +351,7 @@ function isArenaProjection(value: unknown): boolean {
     && finite(value.radiusM);
 }
 
-function isQuizProjection(value: unknown): boolean {
+function isQuizProjection(value: unknown): value is QuizPublicState {
   if (!isRecord(value) || !hasExactKeys(value, ["currentQuestion", "eligibleCount", "questionCount", "questionEndsAt", "questionIndex", "revealEndsAt", "revealedCorrectOptionId", "revealedExplanation", "status", "submittedCount", "templateId"])) return false;
   const question = value.currentQuestion;
   if (!isRecord(question) || !hasExactKeys(question, ["difficulty", "durationMs", "id", "options", "order", "prompt"]) || !Array.isArray(question.options)) return false;
@@ -274,7 +373,7 @@ function isQuizProjection(value: unknown): boolean {
     && value.templateId === "programming-fundamentals-v1";
 }
 
-function isBattleProjection(value: unknown): boolean {
+function isBattleProjection(value: unknown): value is BattlePublicState {
   if (!isRecord(value) || !hasExactKeys(value, ["completionReason", "endsAt", "standings", "startsAt", "status", "winnerId"]) || !Array.isArray(value.standings)) return false;
   return value.standings.every((standing) => isStanding(standing))
     && isOneOf(value.completionReason, ["", "last_alive", "timer"])
@@ -285,7 +384,7 @@ function isBattleProjection(value: unknown): boolean {
 }
 
 /** Validates the complete synchronized Schema projection, including its privacy allow-list. */
-export function isPublicRoomStateProjection(value: unknown): boolean {
+export function isPublicRoomStateProjection(value: unknown): value is PublicRoomState {
   if (!isRecord(value) || !hasExactKeys(value, ["arena", "battle", "eventSequence", "organizer", "phase", "players", "protocolVersion", "quiz", "roomId", "roundId", "serverNow"]) || !isRecord(value.players)) return false;
   return value.protocolVersion === PROTOCOL_VERSION
     && isArenaProjection(value.arena)

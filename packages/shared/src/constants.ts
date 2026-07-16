@@ -1,5 +1,8 @@
 export const PROTOCOL_VERSION = 1 as const;
 
+export const CHARACTER_IDS = ["default", "knight", "ninja", "wizard"] as const;
+export const CHARACTER_COLOR_IDS = ["gold", "coral", "aqua", "violet"] as const;
+
 export const ARENA = {
   DEFAULT_RADIUS_M: 4,
   MARKER_EXCLUSION_RADIUS_M: 0.75,

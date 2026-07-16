@@ -53,7 +53,7 @@ We began by turning the idea into Markdown documents and prompts, including the 
 - TypeScript
 - Viro / ARKit / ARCore for AR and 3D rendering
 - GLB character assets
-- Firebase Realtime Database and Anonymous Authentication for the planned hackathon realtime layer
+- Colyseus 0.17 for the authoritative in-memory War Room and session authentication
 
 ## Project structure
 
@@ -68,6 +68,7 @@ Each decision has one authoritative home:
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Component boundaries, runtime flows, state ownership, and invariants |
 | [`API_AND_REALTIME_SPEC.md`](API_AND_REALTIME_SPEC.md) | Exact P0 admission, synchronized state, commands, events, errors, and reconnect contract |
 | [`docs/AR_IMPLEMENTATION_SPEC.md`](docs/AR_IMPLEMENTATION_SPEC.md) | Marker/pose adapter and GLB rendering/asset contract |
+| [`M0_RESULTS.md`](M0_RESULTS.md) | Physical marker-colocation acceptance results and remaining measurements |
 
 Supporting research and testing guides are evidence or procedure, not competing
 sources of truth. The material under `docs/archive/` is historical only.
@@ -87,14 +88,16 @@ assets/         Optimized runtime 3D assets
 
 ## Getting started
 
-Use Node.js 22.13 or newer:
+Use Node.js 22.23.1:
 
 ```bash
 npm install
+npm run server
+# In a second terminal:
 npm run mobile
 ```
 
-The AR experience uses native modules, so install a development build on the device; Expo Go cannot load the Viro integration. For device setup guidance, see [docs/PLATFORM_TESTING.md](docs/PLATFORM_TESTING.md).
+The AR experience uses native modules, so install a development build on the device; Expo Go cannot load the Viro integration. Print the [A4 arena marker](output/pdf/codexwars-arena-marker-a4.pdf) at 100% / Actual size and verify its black square is 180 mm wide. For device setup guidance, see [docs/PLATFORM_TESTING.md](docs/PLATFORM_TESTING.md).
 
 ## Submission
 

@@ -45,6 +45,51 @@ describe("War Room admission", () => {
     expect([...room.state.players.values()][0]?.displayName).toBe("Ada Lovelace");
   });
 
+  it("returns the server-bound role and player identity on request", async () => {
+    const room = await colyseus.createRoom("war", { displayName: "Teacher", protocolVersion: 1 });
+    const organizer = await colyseus.connectTo(room, { displayName: "Teacher", protocolVersion: 1 });
+    const participant = await colyseus.connectTo(room, { displayName: "Ada", protocolVersion: 1 });
+    const playerId = [...room.state.players.keys()][0]!;
+
+    const organizerIdentity = organizer.waitForMessage("session_ready");
+    organizer.send("request_session", { protocolVersion: 1 });
+    const participantIdentity = participant.waitForMessage("session_ready");
+    participant.send("request_session", { protocolVersion: 1 });
+
+    await expect(organizerIdentity).resolves.toEqual({ playerId: null, role: "organizer" });
+    await expect(participantIdentity).resolves.toEqual({ playerId, role: "participant" });
+  });
+
+  it("synchronizes an approved cosmetic selection without changing Battle Stats", async () => {
+    const room = await colyseus.createRoom("war", { displayName: "Teacher", protocolVersion: 1 });
+    await colyseus.connectTo(room, { displayName: "Teacher", protocolVersion: 1 });
+    const participant = await colyseus.connectTo(room, { displayName: "Ada", protocolVersion: 1 });
+    const playerId = [...room.state.players.keys()][0]!;
+    const before = room.state.players.get(playerId)!;
+    const battleStats = {
+      charges: before.charges,
+      hp: before.hp,
+      maxHp: before.maxHp,
+      nextAttackAt: before.nextAttackAt,
+      shield: before.shield,
+      weaponId: before.weaponId
+    };
+
+    participant.send("select_character", {
+      characterId: "wizard",
+      colorId: "violet",
+      commandId: "select-wizard",
+      roundId: room.state.roundId
+    });
+    await room.waitForNextPatch();
+
+    expect(room.state.players.get(playerId)).toMatchObject({
+      characterColorId: "violet",
+      characterId: "wizard"
+    });
+    expect(room.state.players.get(playerId)).toMatchObject(battleStats);
+  });
+
   it("removes an intentional participant leave instead of retaining a ghost record", async () => {
     const room = await colyseus.createRoom("war", { displayName: "Teacher", protocolVersion: 1 });
     await colyseus.connectTo(room, { displayName: "Teacher", protocolVersion: 1 });
