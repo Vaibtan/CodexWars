@@ -6,9 +6,9 @@ import type { CharacterSelection } from "./src/features/characters/types";
 import {
   createOrganizerWarRoom,
   joinParticipantWarRoom,
+  useWarRoom,
   type WarRoomRealtimeClient,
-} from "./src/features/warRoom/realtimeClient";
-import { useWarRoom } from "./src/features/warRoom/useWarRoom";
+} from "./src/features/warRoom";
 import { CharacterCustomizationScreen } from "./src/screens/CharacterCustomizationScreen";
 import { BattleResultsScreen } from "./src/screens/BattleResultsScreen";
 import { ArCharacterTestScreen } from "./src/screens/ArCharacterTestScreen";

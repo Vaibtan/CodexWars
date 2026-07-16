@@ -6,19 +6,17 @@ import {
   applyDamage,
   ATTACK_COMMANDS_PER_SECOND,
   BATTLE,
-  isClientEventPayload,
+  COMMAND_NAMES,
   isPublicRoomStateProjection,
+  isOrganizerCommand,
+  isPositionCommand,
   isSessionRequestPayload,
   MAX_COMMANDS_PER_ROUND,
-  MAX_MALFORMED_QUIZ_ATTEMPTS,
   normalizeDirection,
-  isServerEventPayload,
   parseCommand,
   POSITION_COMMANDS_PER_SECOND,
   PROGRAMMING_FUNDAMENTALS_V1,
   PROTOCOL_VERSION,
-  publicQuizQuestion,
-  QUIZ,
   resolveBoltAttack,
   startingShieldForScore,
   standingsFor,
@@ -35,33 +33,13 @@ import {
   type Standing,
   type ValidatedCommand
 } from "@codexwars/shared";
-import { BattleState, PlayerState, QuizOptionState, QuizQuestionState, QuizState, StandingState, WarRoomState } from "./state.js";
+import { BattleState, PlayerState, StandingState, WarRoomState } from "./state.js";
+import { type CommandOutcome, type ParticipantMember, WarRoomMembership } from "./membership.js";
+import { QuizRun } from "./quiz-run.js";
 import { RoomIdAllocator, type PresenceSet } from "./room-id.js";
 
 interface JoinAuth {
   readonly displayName: string;
-}
-
-interface PrivatePlayer {
-  readonly answers: Map<string, string>;
-  readonly commandOutcomes: Map<string, CommandOutcome>;
-  readonly malformedQuizAttempts: Map<string, number>;
-  readonly playerId: PlayerId;
-  readonly recentAttackAttempts: number[];
-  readonly recentPositionAttempts: number[];
-  sessionId: string;
-}
-
-interface CommandOutcome {
-  readonly command: CommandName;
-  readonly commandId: string;
-  readonly roundId: number;
-  readonly serverNow: number;
-}
-
-interface OrganizerPrivateState {
-  readonly commandOutcomes: Map<string, CommandOutcome>;
-  sessionId: string;
 }
 
 interface CombatBlocker {
@@ -118,19 +96,21 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
   declare state: WarRoomState;
 
   private codeAllocated = false;
+  private membership!: WarRoomMembership;
   private roomIdAllocator: RoomIdAllocator | undefined;
-  private organizer: OrganizerPrivateState | undefined;
-  private readonly playersById = new Map<PlayerId, PrivatePlayer>();
-  private readonly playerIdBySessionId = new Map<string, PlayerId>();
-  private frozenCohort = new Set<PlayerId>();
+  private quizRun!: QuizRun;
   private lastSuccessfulActivityAt = 0;
-  private nextPlayerId = 1;
 
   async onCreate(): Promise<void> {
     this.autoDispose = false;
     this.maxClients = ARENA.MAX_PARTICIPANTS + 1;
     this.patchRate = 100;
     this.setState(new WarRoomState());
+    this.membership = new WarRoomMembership(this.state);
+    this.quizRun = new QuizRun(this.state, {
+      participantEvent: (playerId, type, payload) => this.sendToPlayer(playerId, type, payload),
+      roomEvent: (type, payload) => this.emitEvent(type, payload)
+    });
     const templateValidation = validateQuizTemplate(PROGRAMMING_FUNDAMENTALS_V1);
     if (!templateValidation.ok) throw new Error(`Invalid P0 quiz template: ${templateValidation.reason}`);
     this.state.serverNow = this.now();
@@ -138,19 +118,7 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
     await this.allocateRoomId();
     this.state.roomId = this.roomId;
 
-    this.onMessage("set_combat_included", (client, payload) => this.handleMessage(client, "set_combat_included", payload));
-    this.onMessage("configure_arena", (client, payload) => this.handleMessage(client, "configure_arena", payload));
-    this.onMessage("select_quiz_template", (client, payload) => this.handleMessage(client, "select_quiz_template", payload));
-    this.onMessage("start_quiz", (client, payload) => this.handleMessage(client, "start_quiz", payload));
-    this.onMessage("start_battle", (client, payload) => this.handleMessage(client, "start_battle", payload));
-    this.onMessage("reset_round", (client, payload) => this.handleMessage(client, "reset_round", payload));
-    this.onMessage("select_character", (client, payload) => this.handleMessage(client, "select_character", payload));
-    this.onMessage("quiz_answer", (client, payload) => this.handleMessage(client, "quiz_answer", payload));
-    this.onMessage("localization_changed", (client, payload) => this.handleMessage(client, "localization_changed", payload));
-    this.onMessage("lock_position", (client, payload) => this.handleMessage(client, "lock_position", payload));
-    this.onMessage("unlock_position", (client, payload) => this.handleMessage(client, "unlock_position", payload));
-    this.onMessage("ready_changed", (client, payload) => this.handleMessage(client, "ready_changed", payload));
-    this.onMessage("attack", (client, payload) => this.handleMessage(client, "attack", payload));
+    for (const name of COMMAND_NAMES) this.onMessage(name, (client, payload) => this.handleMessage(client, name, payload));
     this.onMessage("request_session", (client, payload) => this.handleSessionRequest(client, payload));
 
     this.clock.setInterval(() => this.advanceTimers(), 100);
@@ -162,89 +130,39 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
     }
     const displayName = normalizeDisplayName(options.displayName);
     if (displayName === undefined) throw new Error("NICKNAME_INVALID");
-    if (this.organizer !== undefined && this.state.players.size >= ARENA.MAX_PARTICIPANTS) {
+    if (this.membership.hasOrganizer && this.state.players.size >= ARENA.MAX_PARTICIPANTS) {
       throw new Error("ROOM_FULL");
     }
-    if (this.organizer !== undefined && this.state.phase !== "lobby") throw new Error("ROOM_NOT_JOINABLE");
+    if (this.membership.hasOrganizer && this.state.phase !== "lobby") throw new Error("ROOM_NOT_JOINABLE");
     return { displayName };
   }
 
   onJoin(client: Client, _options: unknown, auth: JoinAuth): void {
-    if (this.organizer === undefined) {
-      this.organizer = { commandOutcomes: new Map(), sessionId: client.sessionId };
-      this.state.organizer.connected = true;
-      this.state.organizer.displayName = auth.displayName;
-      this.touch();
-      return;
-    }
-
-    const existingPlayerId = this.playerIdBySessionId.get(client.sessionId);
-    if (existingPlayerId !== undefined) {
-      const existing = this.state.players.get(existingPlayerId);
-      if (existing !== undefined) existing.connected = true;
-      this.touch();
-      return;
-    }
-
-    const playerId = `player-${this.nextPlayerId++}`;
-    const publicPlayer = this.newPlayerState(playerId, this.uniqueDisplayName(auth.displayName));
-    this.state.players.set(playerId, publicPlayer);
-    this.playersById.set(playerId, {
-      answers: new Map(),
-      commandOutcomes: new Map(),
-      malformedQuizAttempts: new Map(),
-      playerId,
-      recentAttackAttempts: [],
-      recentPositionAttempts: [],
-      sessionId: client.sessionId
-    });
-    this.playerIdBySessionId.set(client.sessionId, playerId);
+    this.membership.join(client.sessionId, auth.displayName);
     this.touch();
   }
 
   onDrop(client: Client): void {
-    if (this.organizer?.sessionId === client.sessionId) {
-      this.state.organizer.connected = false;
+    const member = this.membership.drop(client.sessionId, this.now());
+    if (member?.kind === "organizer") {
       this.allowOrganizerReconnection(client);
       return;
     }
-    const playerId = this.playerIdBySessionId.get(client.sessionId);
-    const player = playerId === undefined ? undefined : this.state.players.get(playerId);
-    if (playerId === undefined || player === undefined) return;
-    player.connected = false;
-    player.disconnectedAt = this.now();
-    if (this.state.phase !== "countdown" && this.state.phase !== "battle") player.ready = false;
-    this.allowParticipantReconnection(client, playerId);
+    if (member?.kind === "participant") this.allowParticipantReconnection(client, member.playerId);
   }
 
   onReconnect(client: Client): void {
-    if (this.organizer?.sessionId === client.sessionId) {
-      this.state.organizer.connected = true;
-      this.touch();
-      return;
-    }
-    const playerId = this.playerIdBySessionId.get(client.sessionId);
-    if (playerId === undefined) return;
-    const player = this.state.players.get(playerId);
-    const privatePlayer = this.playersById.get(playerId);
-    if (player === undefined || privatePlayer === undefined) return;
-    player.connected = true;
-    player.disconnectedAt = 0;
-    privatePlayer.sessionId = client.sessionId;
-    this.touch();
+    if (this.membership.reconnect(client.sessionId) !== undefined) this.touch();
   }
 
   onLeave(client: Client): void {
-    if (this.organizer?.sessionId === client.sessionId && !this.state.organizer.connected) {
+    const member = this.membership.memberForSession(client.sessionId);
+    if (member?.kind === "organizer" && !this.state.organizer.connected) {
       this.disconnect();
       return;
     }
-    const playerId = this.playerIdBySessionId.get(client.sessionId);
-    const player = playerId === undefined ? undefined : this.state.players.get(playerId);
-    if (playerId === undefined || player === undefined || !player.connected) return;
-    this.state.players.delete(playerId);
-    this.playersById.delete(playerId);
-    this.playerIdBySessionId.delete(client.sessionId);
+    const removed = this.membership.removeConnectedParticipant(client.sessionId);
+    if (removed !== undefined) this.quizRun.removeParticipant(removed.playerId);
   }
 
   async onDispose(): Promise<void> {
@@ -252,8 +170,9 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
   }
 
   onBeforePatch(): void {
-    this.state.serverNow = this.now();
-    if (this.now() - this.lastSuccessfulActivityAt >= BATTLE.IDLE_EXPIRY_MS) this.disconnect();
+    const now = this.now();
+    this.state.serverNow = now;
+    if (now - this.lastSuccessfulActivityAt >= BATTLE.IDLE_EXPIRY_MS) this.disconnect();
     if (!isPublicRoomStateProjection(this.state.toJSON())) throw new TypeError("Invalid public room state projection");
   }
 
@@ -267,33 +186,18 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
     this.codeAllocated = true;
   }
 
-  private newPlayerState(playerId: PlayerId, displayName: string): PlayerState {
-    const player = new PlayerState();
-    player.playerId = playerId;
-    player.displayName = displayName;
-    return player;
-  }
-
-  private uniqueDisplayName(baseName: string): string {
-    const names = new Set([...this.state.players.values()].map((player) => player.displayName));
-    if (!names.has(baseName)) return baseName;
-    let suffix = 2;
-    while (names.has(`${baseName} (${suffix})`)) suffix += 1;
-    return `${baseName} (${suffix})`;
-  }
-
   private handleMessage(client: Client, name: CommandName, rawPayload: unknown): void {
     const parsed = parseCommand(name, rawPayload);
-    const playerId = this.playerIdBySessionId.get(client.sessionId);
-    const privatePlayer = playerId === undefined ? undefined : this.playersById.get(playerId);
-    const isOrganizer = this.organizer?.sessionId === client.sessionId;
-    if (!isOrganizer && privatePlayer === undefined) {
+    const member = this.membership.memberForSession(client.sessionId);
+    const participant = member?.kind === "participant" ? member : undefined;
+    const isOrganizer = member?.kind === "organizer";
+    if (member === undefined) {
       this.error(client, "SESSION_EXPIRED");
       return;
     }
     const now = this.now();
     if (parsed.ok === false) {
-      const malformedAllowed = name !== "quiz_answer" || privatePlayer === undefined || this.recordMalformedQuizAttempt(privatePlayer);
+      const malformedAllowed = name !== "quiz_answer" || participant === undefined || this.quizRun.recordMalformedAttempt(participant.playerId);
       this.error(client, malformedAllowed ? parsed.code : "RATE_LIMITED");
       return;
     }
@@ -302,17 +206,13 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
       this.error(client, "ROUND_MISMATCH", command.commandId);
       return;
     }
-    const outcomes = isOrganizer ? this.organizer?.commandOutcomes : privatePlayer?.commandOutcomes;
-    if (outcomes === undefined) {
-      this.error(client, "SESSION_EXPIRED", command.commandId);
-      return;
-    }
+    const outcomes = member.commandOutcomes;
     const duplicate = outcomes.get(command.commandId);
     if (duplicate !== undefined) {
       this.sendClientEvent(client, "command_accepted", duplicate);
       return;
     }
-    if (!this.withinRawRate(privatePlayer, name, now)) {
+    if (!this.withinRawRate(participant, name, now)) {
       this.error(client, "RATE_LIMITED", command.commandId);
       return;
     }
@@ -325,7 +225,7 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
       return;
     }
 
-    const accepted = this.applyCommand(client, privatePlayer, command, now);
+    const accepted = this.applyCommand(client, participant, command, now);
     if (!accepted) return;
     const outcome: CommandOutcome = { command: name, commandId: command.commandId, roundId: this.state.roundId, serverNow: now };
     if (command.command !== "reset_round") outcomes.set(command.commandId, outcome);
@@ -338,38 +238,50 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
       this.error(client, "CLIENT_VERSION_UNSUPPORTED");
       return;
     }
-    if (this.organizer?.sessionId === client.sessionId) {
+    const member = this.membership.memberForSession(client.sessionId);
+    if (member?.kind === "organizer") {
       this.sendClientEvent(client, "session_ready", { playerId: null, role: "organizer" });
       return;
     }
-    const playerId = this.playerIdBySessionId.get(client.sessionId);
-    if (playerId === undefined) {
+    if (member?.kind !== "participant") {
       this.error(client, "SESSION_EXPIRED");
       return;
     }
-    this.sendClientEvent(client, "session_ready", { playerId, role: "participant" });
+    this.sendClientEvent(client, "session_ready", { playerId: member.playerId, role: "participant" });
   }
 
   private authorizedForCommand(isOrganizer: boolean, command: ValidatedCommand): boolean {
-    const organizerCommand = command.command === "set_combat_included" || command.command === "configure_arena" || command.command === "select_quiz_template" || command.command === "start_quiz" || command.command === "start_battle" || command.command === "reset_round";
-    return organizerCommand ? isOrganizer && this.state.organizer.connected : !isOrganizer;
+    return isOrganizerCommand(command.command) ? isOrganizer && this.state.organizer.connected : !isOrganizer;
   }
 
-  private applyCommand(client: Client, actor: PrivatePlayer | undefined, command: ValidatedCommand, now: number): boolean {
+  private applyCommand(client: Client, actor: ParticipantMember | undefined, command: ValidatedCommand, now: number): boolean {
     switch (command.command) {
-      case "set_combat_included": return this.setCombatIncluded(client, command);
-      case "configure_arena": return this.configureArena(client, command);
-      case "select_quiz_template": return this.selectTemplate(client);
-      case "start_quiz": return this.startQuiz(client, now);
-      case "start_battle": return this.startBattle(client, now);
-      case "reset_round": return this.resetRound(client);
-      case "select_character": return actor !== undefined && this.selectCharacter(client, actor, command);
-      case "quiz_answer": return actor !== undefined && this.submitQuizAnswer(client, actor, command, now);
-      case "localization_changed": return actor !== undefined && this.changeLocalization(client, actor, command);
-      case "lock_position": return actor !== undefined && this.lockPosition(client, actor, command);
-      case "unlock_position": return actor !== undefined && this.unlockPosition(client, actor);
-      case "ready_changed": return actor !== undefined && this.changeReady(client, actor, command);
-      case "attack": return actor !== undefined && this.attack(client, actor, command, now);
+      case "set_combat_included":
+        return this.setCombatIncluded(client, command);
+      case "configure_arena":
+        return this.configureArena(client, command);
+      case "select_quiz_template":
+        return this.selectTemplate(client);
+      case "start_quiz":
+        return this.startQuiz(client, now);
+      case "start_battle":
+        return this.startBattle(client, now);
+      case "reset_round":
+        return this.resetRound(client);
+      case "select_character":
+        return actor !== undefined && this.selectCharacter(client, actor, command);
+      case "quiz_answer":
+        return actor !== undefined && this.submitQuizAnswer(client, actor, command, now);
+      case "localization_changed":
+        return actor !== undefined && this.changeLocalization(client, actor, command);
+      case "lock_position":
+        return actor !== undefined && this.lockPosition(client, actor, command);
+      case "unlock_position":
+        return actor !== undefined && this.unlockPosition(client, actor);
+      case "ready_changed":
+        return actor !== undefined && this.changeReady(client, actor, command);
+      case "attack":
+        return actor !== undefined && this.attack(client, actor, command, now);
     }
   }
 
@@ -382,7 +294,7 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
     return true;
   }
 
-  private selectCharacter(client: Client, actor: PrivatePlayer, command: Extract<ValidatedCommand, { command: "select_character" }>): boolean {
+  private selectCharacter(client: Client, actor: ParticipantMember, command: Extract<ValidatedCommand, { command: "select_character" }>): boolean {
     const player = this.state.players.get(actor.playerId);
     if (player === undefined) return this.reject(client, "SESSION_EXPIRED", command.commandId);
     if (this.state.phase !== "lobby" && this.state.phase !== "quiz" && this.state.phase !== "localization") {
@@ -394,8 +306,7 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
   }
 
   private configureArena(client: Client, command: Extract<ValidatedCommand, { command: "configure_arena" }>): boolean {
-    const phaseAllowed = this.state.phase === "lobby" || this.state.phase === "quiz" || this.state.phase === "localization" || (this.state.phase === "positioning" && ![...this.state.players.values()].some((player) => player.positionLocked));
-    if (!phaseAllowed) return this.rejectPhase(client, command.commandId);
+    if (!this.canConfigureArena()) return this.rejectPhase(client, command.commandId);
     if (command.radiusM < ARENA.MIN_RADIUS_M || command.radiusM > ARENA.MAX_RADIUS_M) return this.reject(client, "ARENA_RADIUS_INVALID", command.commandId);
     this.state.arena.radiusM = command.radiusM;
     this.state.arena.configured = true;
@@ -403,57 +314,21 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
   }
 
   private selectTemplate(client: Client): boolean {
-    if (this.state.phase !== "lobby") return this.rejectPhase(client);
-    this.state.quiz.status = "ready";
+    if (!this.quizRun.selectTemplate()) return this.rejectPhase(client);
     return true;
   }
 
   private startQuiz(client: Client, now: number): boolean {
-    if (this.state.phase !== "lobby" || this.state.players.size === 0 || this.state.quiz.status !== "ready") return this.reject(client, "QUIZ_NOT_READY");
-    this.frozenCohort = new Set(this.state.players.keys());
-    this.state.quiz.eligibleCount = this.frozenCohort.size;
-    this.state.phase = "quiz";
-    this.startQuestion(0, now);
+    if (!this.quizRun.start(now)) return this.reject(client, "QUIZ_NOT_READY");
     return true;
   }
 
-  private startQuestion(questionIndex: number, now: number): void {
-    const question = PROGRAMMING_FUNDAMENTALS_V1.questions[questionIndex];
-    if (question === undefined) {
-      this.completeQuiz();
-      return;
-    }
-    this.state.quiz.status = "question";
-    this.state.quiz.questionIndex = questionIndex;
-    this.state.quiz.questionEndsAt = now + question.durationMs;
-    this.state.quiz.revealEndsAt = 0;
-    this.state.quiz.revealedCorrectOptionId = "";
-    this.state.quiz.revealedExplanation = "";
-    this.state.quiz.submittedCount = 0;
-    this.state.quiz.currentQuestion = this.toQuestionState(question);
-    for (const playerId of this.frozenCohort) {
-      const player = this.state.players.get(playerId);
-      if (player !== undefined) player.hasAnsweredCurrent = false;
-    }
-    this.emitEvent("quiz_question_started", { questionEndsAt: this.state.quiz.questionEndsAt, questionId: question.id, questionIndex });
+  private submitQuizAnswer(client: Client, actor: ParticipantMember, command: Extract<ValidatedCommand, { command: "quiz_answer" }>, now: number): boolean {
+    const submission = this.quizRun.submit(actor.playerId, command, now);
+    return submission.ok || this.reject(client, submission.code, command.commandId);
   }
 
-  private submitQuizAnswer(client: Client, actor: PrivatePlayer, command: Extract<ValidatedCommand, { command: "quiz_answer" }>, now: number): boolean {
-    const question = PROGRAMMING_FUNDAMENTALS_V1.questions[this.state.quiz.questionIndex];
-    const player = this.state.players.get(actor.playerId);
-    if (question === undefined || player === undefined || !this.frozenCohort.has(actor.playerId) || this.state.quiz.status !== "question") return this.rejectPhase(client, command.commandId);
-    if (command.questionId !== question.id) return this.reject(client, "QUESTION_MISMATCH", command.commandId);
-    if (!question.options.some((option) => option.id === command.optionId)) return this.reject(client, "ANSWER_OPTION_INVALID", command.commandId);
-    if (now >= this.state.quiz.questionEndsAt) return this.reject(client, "ANSWER_LATE", command.commandId);
-    if (actor.answers.has(question.id)) return this.reject(client, "ANSWER_DUPLICATE", command.commandId);
-    actor.answers.set(question.id, command.optionId);
-    player.hasAnsweredCurrent = true;
-    this.state.quiz.submittedCount += 1;
-    this.sendClientEvent(client, "quiz_answer_accepted", { acceptedAt: now, commandId: command.commandId, questionId: question.id, roundId: this.state.roundId });
-    return true;
-  }
-
-  private changeLocalization(client: Client, actor: PrivatePlayer, command: Extract<ValidatedCommand, { command: "localization_changed" }>): boolean {
+  private changeLocalization(client: Client, actor: ParticipantMember, command: Extract<ValidatedCommand, { command: "localization_changed" }>): boolean {
     const player = this.state.players.get(actor.playerId);
     const phaseAllowed = this.state.phase === "localization" || this.state.phase === "positioning" || this.state.phase === "countdown" || this.state.phase === "battle";
     if (player === undefined || !player.combatIncluded) return this.reject(client, "ROLE_FORBIDDEN", command.commandId);
@@ -464,7 +339,7 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
     return true;
   }
 
-  private lockPosition(client: Client, actor: PrivatePlayer, command: Extract<ValidatedCommand, { command: "lock_position" }>): boolean {
+  private lockPosition(client: Client, actor: ParticipantMember, command: Extract<ValidatedCommand, { command: "lock_position" }>): boolean {
     const player = this.state.players.get(actor.playerId);
     if (this.state.phase !== "positioning") return this.rejectPhase(client, command.commandId);
     if (player === undefined || !player.combatIncluded) return this.reject(client, "ROLE_FORBIDDEN", command.commandId);
@@ -480,7 +355,7 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
     return true;
   }
 
-  private unlockPosition(client: Client, actor: PrivatePlayer): boolean {
+  private unlockPosition(client: Client, actor: ParticipantMember): boolean {
     const player = this.state.players.get(actor.playerId);
     if (this.state.phase !== "positioning") return this.rejectPhase(client);
     if (player === undefined || !player.combatIncluded) return this.reject(client, "ROLE_FORBIDDEN");
@@ -491,7 +366,7 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
     return true;
   }
 
-  private changeReady(client: Client, actor: PrivatePlayer, command: Extract<ValidatedCommand, { command: "ready_changed" }>): boolean {
+  private changeReady(client: Client, actor: ParticipantMember, command: Extract<ValidatedCommand, { command: "ready_changed" }>): boolean {
     const player = this.state.players.get(actor.playerId);
     if (this.state.phase !== "positioning") return this.rejectPhase(client, command.commandId);
     if (player === undefined || !player.combatIncluded) return this.reject(client, "ROLE_FORBIDDEN", command.commandId);
@@ -522,32 +397,60 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
     return true;
   }
 
-  private attack(client: Client, actor: PrivatePlayer, command: Extract<ValidatedCommand, { command: "attack" }>, now: number): boolean {
+  private attack(client: Client, actor: ParticipantMember, command: Extract<ValidatedCommand, { command: "attack" }>, now: number): boolean {
     const attacker = this.state.players.get(actor.playerId);
-    if (this.state.phase !== "battle" || this.state.battle.status !== "active" || now < this.state.battle.startsAt || now >= this.state.battle.endsAt || attacker === undefined || !attacker.connected || !attacker.combatIncluded || attacker.eliminated || !attacker.positionLocked || attacker.localization === "lost") return this.reject(client, "ATTACK_NOT_ALLOWED", command.commandId);
+    if (!this.canAttack(attacker, now)) return this.reject(client, "ATTACK_NOT_ALLOWED", command.commandId);
     if (command.weaponId !== "bolt") return this.reject(client, "WEAPON_INVALID", command.commandId);
     const direction = normalizeDirection(command.dirX, command.dirZ);
     if (!direction.ok) return this.reject(client, "ATTACK_DIRECTION_INVALID", command.commandId);
     if (now < attacker.nextAttackAt) return this.reject(client, "ATTACK_COOLDOWN", command.commandId);
     attacker.nextAttackAt = now + WEAPONS.bolt.cooldownMs;
     const resolution = resolveBoltAttack(this.combatant(attacker), [...this.state.players.values()].filter((player) => player.playerId !== attacker.playerId).map((player) => this.combatant(player)), direction.direction);
-    let targetId: string | null = null;
-    let targetShield: number | null = null;
-    let targetHp: number | null = null;
-    if (resolution.target !== undefined) {
-      const target = this.state.players.get(resolution.target.playerId);
-      if (target !== undefined) {
-        targetId = target.playerId;
-        const damage = this.applyBoltDamage(target);
-        targetShield = target.shield;
-        targetHp = target.hp;
-        this.emitEvent("attack_resolved", { attackerId: attacker.playerId, commandId: command.commandId, damage, targetHp, targetId, targetShield });
-        if (target.eliminated) this.emitEvent("player_eliminated", { eliminatedByPlayerId: attacker.playerId, playerId: target.playerId });
-      }
+    if (resolution.target === undefined) {
+      this.emitEvent("attack_resolved", {
+        attackerId: attacker.playerId,
+        commandId: command.commandId,
+        damage: 0,
+        targetHp: null,
+        targetId: null,
+        targetShield: null
+      });
+      this.completeIfLastAlive();
+      return true;
     }
-    if (resolution.target === undefined) this.emitEvent("attack_resolved", { attackerId: attacker.playerId, commandId: command.commandId, damage: 0, targetHp, targetId, targetShield });
+
+    const target = this.state.players.get(resolution.target.playerId)!;
+    const damage = this.applyBoltDamage(target);
+    this.emitEvent("attack_resolved", {
+      attackerId: attacker.playerId,
+      commandId: command.commandId,
+      damage,
+      targetHp: target.hp,
+      targetId: target.playerId,
+      targetShield: target.shield
+    });
+    if (target.eliminated) this.emitEvent("player_eliminated", { eliminatedByPlayerId: attacker.playerId, playerId: target.playerId });
     this.completeIfLastAlive();
     return true;
+  }
+
+  private canAttack(attacker: PlayerState | undefined, now: number): attacker is PlayerState {
+    return attacker !== undefined
+      && this.state.phase === "battle"
+      && this.state.battle.status === "active"
+      && now >= this.state.battle.startsAt
+      && now < this.state.battle.endsAt
+      && attacker.connected
+      && attacker.combatIncluded
+      && !attacker.eliminated
+      && attacker.positionLocked
+      && attacker.localization !== "lost";
+  }
+
+  private canConfigureArena(): boolean {
+    if (this.state.phase === "lobby" || this.state.phase === "quiz" || this.state.phase === "localization") return true;
+    if (this.state.phase !== "positioning") return false;
+    return ![...this.state.players.values()].some((player) => player.positionLocked);
   }
 
   private resetRound(client: Client): boolean {
@@ -555,18 +458,14 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
     this.state.roundId += 1;
     this.state.eventSequence = 0;
     this.state.phase = "lobby";
-    this.state.quiz = new QuizState();
+    this.quizRun.reset();
     this.state.battle = new BattleState();
-    this.frozenCohort = new Set();
-    this.organizer?.commandOutcomes.clear();
-    for (const [playerId, player] of this.state.players) {
+    this.membership.clearCommandOutcomes();
+    for (const player of this.state.players.values()) {
       this.clearPreBattleState(player);
       player.combatIncluded = true;
       player.quizCompleted = false;
       player.correctAnswers = 0;
-      this.playersById.get(playerId)?.answers.clear();
-      this.playersById.get(playerId)?.commandOutcomes.clear();
-      this.playersById.get(playerId)?.malformedQuizAttempts.clear();
     }
     return true;
   }
@@ -574,45 +473,12 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
   private advanceTimers(): void {
     const now = this.now();
     this.state.serverNow = now;
-    if (this.state.phase === "quiz" && this.state.quiz.status === "question" && now >= this.state.quiz.questionEndsAt) this.revealQuestion(now);
-    else if (this.state.phase === "quiz" && this.state.quiz.status === "reveal" && now >= this.state.quiz.revealEndsAt) this.startQuestion(this.state.quiz.questionIndex + 1, now);
+    this.quizRun.advance(now);
     if (this.state.phase === "countdown" && now >= this.state.battle.startsAt) {
       this.state.phase = "battle";
       this.state.battle.status = "active";
     }
     if (this.state.phase === "battle" && now >= this.state.battle.endsAt) this.finishBattle("timer");
-  }
-
-  private revealQuestion(now: number): void {
-    const question = PROGRAMMING_FUNDAMENTALS_V1.questions[this.state.quiz.questionIndex];
-    if (question === undefined) return;
-    this.state.quiz.status = "reveal";
-    this.state.quiz.revealedCorrectOptionId = question.answerOptionId;
-    this.state.quiz.revealedExplanation = question.explanation;
-    this.state.quiz.revealEndsAt = now + QUIZ.REVEAL_MS;
-    this.emitEvent("quiz_question_revealed", { correctOptionId: question.answerOptionId, explanation: question.explanation, questionId: question.id, revealEndsAt: this.state.quiz.revealEndsAt });
-    for (const playerId of this.frozenCohort) {
-      const privatePlayer = this.playersById.get(playerId);
-      const player = this.state.players.get(playerId);
-      if (privatePlayer === undefined || player === undefined) continue;
-      const selectedOptionId = privatePlayer.answers.get(question.id);
-      const correct = selectedOptionId === question.answerOptionId;
-      if (correct) player.correctAnswers += 1;
-      this.sendToPlayer(playerId, "quiz_answer_result", { correct, questionId: question.id, roundId: this.state.roundId, runningCorrectAnswers: player.correctAnswers, ...(selectedOptionId === undefined ? {} : { selectedOptionId }) });
-    }
-  }
-
-  private completeQuiz(): void {
-    this.state.quiz.status = "completed";
-    this.state.phase = "localization";
-    this.state.quiz.currentQuestion = new QuizQuestionState();
-    for (const playerId of this.frozenCohort) {
-      const player = this.state.players.get(playerId);
-      if (player === undefined) continue;
-      player.quizCompleted = true;
-      player.shield = startingShieldForScore(player.correctAnswers);
-      this.sendToPlayer(playerId, "quiz_completed", { correctAnswers: player.correctAnswers, questionCount: QUIZ.QUESTION_COUNT, roundId: this.state.roundId, startingShield: player.shield });
-    }
   }
 
   private transitionToPositioningWhenLocalized(): void {
@@ -676,42 +542,35 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
   private allowParticipantReconnection(client: Client, playerId: PlayerId): void {
     this.allowReconnection(client, BATTLE.DISCONNECT_ELIMINATION_MS / 1_000)
       .catch(() => {
-        const player = this.state.players.get(playerId);
-        if (player === undefined || player.connected || this.state.phase !== "countdown" && this.state.phase !== "battle") return;
-        if (!player.eliminated) {
-          player.hp = 0;
-          player.eliminated = true;
-          this.emitEvent("player_eliminated", { eliminatedByPlayerId: null, playerId });
-          this.completeIfLastAlive();
-        }
+        if (!this.membership.participantReconnectExpired(playerId)) return;
+        this.emitEvent("player_eliminated", { eliminatedByPlayerId: null, playerId });
+        this.completeIfLastAlive();
       });
   }
 
   private allowOrganizerReconnection(client: Client): void {
-    if (this.state.phase === "countdown" || this.state.phase === "battle") {
-      this.allowReconnection(client, BATTLE.DISCONNECT_ELIMINATION_MS / 1_000).catch(() => undefined);
-      return;
-    }
-    this.allowReconnection(client, BATTLE.HOST_RECONNECT_GRACE_MS / 1_000).catch(() => this.disconnect());
+    const policy = this.membership.organizerReconnectPolicy();
+    const reconnection = this.allowReconnection(client, policy.graceMs / 1_000);
+    if (policy.closeRoomOnExpiry) reconnection.catch(() => this.disconnect());
+    else reconnection.catch(() => undefined);
   }
 
-  private withinRawRate(actor: PrivatePlayer | undefined, name: CommandName, now: number): boolean {
+  private withinRawRate(actor: ParticipantMember | undefined, name: CommandName, now: number): boolean {
     if (actor === undefined) return true;
-    const bucket = name === "attack" ? actor.recentAttackAttempts : name === "localization_changed" || name === "lock_position" || name === "unlock_position" || name === "ready_changed" ? actor.recentPositionAttempts : undefined;
-    if (bucket === undefined) return true;
+    let bucket: number[];
+    let cap: number;
+    if (name === "attack") {
+      bucket = actor.recentAttackAttempts;
+      cap = ATTACK_COMMANDS_PER_SECOND;
+    } else if (isPositionCommand(name)) {
+      bucket = actor.recentPositionAttempts;
+      cap = POSITION_COMMANDS_PER_SECOND;
+    } else {
+      return true;
+    }
     while (bucket.length > 0 && bucket[0] <= now - 1_000) bucket.shift();
-    const cap = name === "attack" ? ATTACK_COMMANDS_PER_SECOND : POSITION_COMMANDS_PER_SECOND;
     if (bucket.length >= cap) return false;
     bucket.push(now);
-    return true;
-  }
-
-  private recordMalformedQuizAttempt(actor: PrivatePlayer): boolean {
-    const questionId = this.state.quiz.currentQuestion.id;
-    if (questionId.length === 0) return true;
-    const attempted = actor.malformedQuizAttempts.get(questionId) ?? 0;
-    if (attempted >= MAX_MALFORMED_QUIZ_ATTEMPTS) return false;
-    actor.malformedQuizAttempts.set(questionId, attempted + 1);
     return true;
   }
 
@@ -730,24 +589,6 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
     player.disconnectedAt = 0;
   }
 
-  private toQuestionState(question: ReturnType<typeof publicQuizQuestion>): QuizQuestionState {
-    const state = new QuizQuestionState();
-    state.id = question.id;
-    state.order = question.order;
-    state.prompt = question.prompt;
-    state.difficulty = question.difficulty;
-    state.durationMs = question.durationMs;
-    const options = new ArraySchema<QuizOptionState>();
-    for (const option of question.options) {
-      const optionState = new QuizOptionState();
-      optionState.id = option.id;
-      optionState.label = option.label;
-      options.push(optionState);
-    }
-    state.options = options;
-    return state;
-  }
-
   private toStandingState(standing: Standing): StandingState {
     const state = new StandingState();
     state.rank = standing.rank;
@@ -761,19 +602,17 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
   }
 
   private emitEvent<Name extends ServerEventName>(type: Name, payload: ServerEventPayloads[Name]): void {
-    if (!isServerEventPayload(type, payload)) throw new TypeError(`Invalid event payload: ${type}`);
     this.state.eventSequence += 1;
     this.broadcast(type, { ...payload, eventSequence: this.state.eventSequence, roundId: this.state.roundId, serverNow: this.now() });
   }
 
   private sendToPlayer<Name extends Exclude<ClientEventName, "command_accepted" | "server_error">>(playerId: PlayerId, type: Name, payload: ClientEventPayloads[Name]): void {
-    const sessionId = this.playersById.get(playerId)?.sessionId;
+    const sessionId = this.membership.sessionIdForPlayer(playerId);
     const client = sessionId === undefined ? undefined : this.clients.find((candidate) => candidate.sessionId === sessionId);
     if (client !== undefined) this.sendClientEvent(client, type, payload);
   }
 
   private sendClientEvent<Name extends ClientEventName>(client: Client, type: Name, payload: ClientEventPayloads[Name]): void {
-    if (!isClientEventPayload(type, payload)) throw new TypeError(`Invalid client event payload: ${type}`);
     client.send(type, payload);
   }
 
@@ -792,13 +631,21 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
   }
 
   private error(client: Client, code: ErrorCode, commandId?: string, details?: Record<string, unknown>): void {
+    const member = this.membership.memberForSession(client.sessionId);
     dependencies.log({
       correlationId: commandId ?? "",
       errorCode: code,
       eventType: "server_error",
-      playerId: this.playerIdBySessionId.get(client.sessionId) ?? "",
+      playerId: member?.kind === "participant" ? member.playerId : "",
       roomIdHash: createHash("sha256").update(this.roomId).digest("hex").slice(0, 16)
     });
-    this.sendClientEvent(client, "server_error", { code, message: code.replace(/_/gu, " ").toLowerCase(), retryable: code === "RATE_LIMITED" || code === "ATTACK_COOLDOWN" || code === "BATTLE_START_BLOCKED", roundId: this.state?.roundId ?? 1, ...(commandId === undefined ? {} : { commandId }), ...(details === undefined ? {} : { details }) });
+    this.sendClientEvent(client, "server_error", {
+      code,
+      message: code.replace(/_/gu, " ").toLowerCase(),
+      retryable: code === "RATE_LIMITED" || code === "ATTACK_COOLDOWN" || code === "BATTLE_START_BLOCKED",
+      roundId: this.state.roundId,
+      ...(commandId === undefined ? {} : { commandId }),
+      ...(details === undefined ? {} : { details })
+    });
   }
 }

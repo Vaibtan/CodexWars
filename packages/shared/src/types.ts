@@ -1,4 +1,4 @@
-import type { CHARACTER_COLOR_IDS, CHARACTER_IDS, PROTOCOL_VERSION, QUIZ } from "./constants.js";
+import type { CHARACTER_COLOR_IDS, CHARACTER_IDS, ERROR_CODES, PROTOCOL_VERSION, QUIZ } from "./constants.js";
 
 export type ProtocolVersion = typeof PROTOCOL_VERSION;
 export type RoomId = string;
@@ -27,6 +27,11 @@ export type BattleStatus = "not_started" | "countdown" | "active" | "completed";
 export interface ArenaPosition {
   readonly x: number;
   readonly z: number;
+}
+
+export interface CharacterSelection {
+  readonly characterId: CharacterId;
+  readonly colorId: CharacterColorId;
 }
 
 export interface QuizOption {
@@ -69,32 +74,4 @@ export interface Standing {
   readonly shield: number;
 }
 
-export type ErrorCode =
-  | "ANSWER_DUPLICATE"
-  | "ANSWER_LATE"
-  | "ANSWER_OPTION_INVALID"
-  | "ARENA_RADIUS_INVALID"
-  | "ATTACK_COOLDOWN"
-  | "ATTACK_DIRECTION_INVALID"
-  | "ATTACK_NOT_ALLOWED"
-  | "BATTLE_START_BLOCKED"
-  | "CLIENT_VERSION_UNSUPPORTED"
-  | "COMMAND_DUPLICATE"
-  | "NICKNAME_INVALID"
-  | "NOT_LOCALIZED"
-  | "PHASE_MISMATCH"
-  | "POSITION_IN_MARKER_EXCLUSION"
-  | "POSITION_INVALID"
-  | "POSITION_OUT_OF_BOUNDS"
-  | "QUESTION_MISMATCH"
-  | "QUIZ_NOT_READY"
-  | "RATE_LIMITED"
-  | "ROLE_FORBIDDEN"
-  | "ROOM_FULL"
-  | "ROOM_ID_EXHAUSTED"
-  | "ROOM_NOT_FOUND"
-  | "ROOM_NOT_JOINABLE"
-  | "ROUND_MISMATCH"
-  | "SESSION_EXPIRED"
-  | "SPACING_VIOLATION"
-  | "WEAPON_INVALID";
+export type ErrorCode = typeof ERROR_CODES[number];

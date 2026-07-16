@@ -3,5 +3,4 @@ export type {
   CharacterColorId,
   CharacterId,
   CharacterSelection,
-  WaitingParticipant,
 } from "@codexwars/shared";

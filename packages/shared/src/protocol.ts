@@ -1,4 +1,4 @@
-import { CHARACTER_COLOR_IDS, CHARACTER_IDS, MAX_COMMAND_BYTES, PROTOCOL_VERSION } from "./constants.js";
+import { CHARACTER_COLOR_IDS, CHARACTER_IDS, ERROR_CODES, MAX_COMMAND_BYTES, PROTOCOL_VERSION } from "./constants.js";
 import type { BattleStatus, CharacterColorId, CharacterId, CommandId, ErrorCode, LocalizationState, PlayerId, ProtocolVersion, PublicQuizQuestion, QuizStatus, RoomId, RoomPhase, RoundId, Standing } from "./types.js";
 
 export interface CommandMeta {
@@ -6,35 +6,54 @@ export interface CommandMeta {
   readonly roundId: RoundId;
 }
 
-export type CommandName =
-  | "attack"
-  | "configure_arena"
-  | "localization_changed"
-  | "lock_position"
-  | "ready_changed"
-  | "reset_round"
-  | "select_character"
-  | "select_quiz_template"
-  | "set_combat_included"
-  | "start_battle"
-  | "start_quiz"
-  | "unlock_position"
-  | "quiz_answer";
+export const COMMAND_NAMES = [
+  "attack",
+  "configure_arena",
+  "localization_changed",
+  "lock_position",
+  "quiz_answer",
+  "ready_changed",
+  "reset_round",
+  "select_character",
+  "select_quiz_template",
+  "set_combat_included",
+  "start_battle",
+  "start_quiz",
+  "unlock_position"
+] as const;
 
-export type ValidatedCommand =
-  | (CommandMeta & { readonly command: "set_combat_included"; readonly included: boolean; readonly playerId: PlayerId })
-  | (CommandMeta & { readonly command: "configure_arena"; readonly radiusM: number })
-  | (CommandMeta & { readonly command: "select_quiz_template"; readonly templateId: "programming-fundamentals-v1" })
-  | (CommandMeta & { readonly command: "start_quiz" })
-  | (CommandMeta & { readonly command: "start_battle" })
-  | (CommandMeta & { readonly command: "reset_round" })
-  | (CommandMeta & { readonly characterId: CharacterId; readonly colorId: CharacterColorId; readonly command: "select_character" })
-  | (CommandMeta & { readonly command: "quiz_answer"; readonly optionId: string; readonly questionId: string })
-  | (CommandMeta & { readonly command: "localization_changed"; readonly state: "searching" | "localized" | "lost" })
-  | (CommandMeta & { readonly command: "lock_position"; readonly x: number; readonly z: number })
-  | (CommandMeta & { readonly command: "unlock_position" })
-  | (CommandMeta & { readonly command: "ready_changed"; readonly ready: boolean })
-  | (CommandMeta & { readonly command: "attack"; readonly dirX: number; readonly dirZ: number; readonly predictedTargetId?: PlayerId; readonly weaponId: "bolt" });
+export type CommandName = typeof COMMAND_NAMES[number];
+
+export interface CommandPayloads {
+  readonly attack: { readonly dirX: number; readonly dirZ: number; readonly predictedTargetId?: PlayerId; readonly weaponId: "bolt" };
+  readonly configure_arena: { readonly radiusM: number };
+  readonly localization_changed: { readonly state: "searching" | "localized" | "lost" };
+  readonly lock_position: { readonly x: number; readonly z: number };
+  readonly quiz_answer: { readonly optionId: string; readonly questionId: string };
+  readonly ready_changed: { readonly ready: boolean };
+  readonly reset_round: Readonly<Record<never, never>>;
+  readonly select_character: { readonly characterId: CharacterId; readonly colorId: CharacterColorId };
+  readonly select_quiz_template: { readonly templateId: "programming-fundamentals-v1" };
+  readonly set_combat_included: { readonly included: boolean; readonly playerId: PlayerId };
+  readonly start_battle: Readonly<Record<never, never>>;
+  readonly start_quiz: Readonly<Record<never, never>>;
+  readonly unlock_position: Readonly<Record<never, never>>;
+}
+
+export type CommandPayload<Name extends CommandName = CommandName> = CommandMeta & CommandPayloads[Name];
+export type CommandEnvelope = { [Name in CommandName]: { readonly name: Name; readonly payload: CommandPayload<Name> } }[CommandName];
+export type ValidatedCommand = { [Name in CommandName]: CommandPayload<Name> & { readonly command: Name } }[CommandName];
+
+const ORGANIZER_COMMAND_NAMES: ReadonlySet<CommandName> = new Set(["configure_arena", "reset_round", "select_quiz_template", "set_combat_included", "start_battle", "start_quiz"]);
+const POSITION_COMMAND_NAMES: ReadonlySet<CommandName> = new Set(["localization_changed", "lock_position", "ready_changed", "unlock_position"]);
+
+export function isOrganizerCommand(name: CommandName): boolean {
+  return ORGANIZER_COMMAND_NAMES.has(name);
+}
+
+export function isPositionCommand(name: CommandName): boolean {
+  return POSITION_COMMAND_NAMES.has(name);
+}
 
 export type RuntimeParseResult = { readonly ok: true; readonly value: ValidatedCommand } | { readonly code: "RATE_LIMITED" | "POSITION_INVALID"; readonly ok: false };
 
@@ -47,7 +66,7 @@ function hasOnlyKeys(value: Record<string, unknown>, keys: readonly string[]): b
 }
 
 function hasMeta(value: Record<string, unknown>): value is Record<string, unknown> & CommandMeta {
-  return typeof value.commandId === "string" && value.commandId.length > 0 && value.commandId.length <= 64 && Number.isInteger(value.roundId) && (value.roundId as number) >= 1;
+  return typeof value.commandId === "string" && value.commandId.length > 0 && value.commandId.length <= 64 && isPositiveInteger(value.roundId);
 }
 
 function finite(value: unknown): value is number {
@@ -83,7 +102,7 @@ export function parseCommand(name: CommandName, payload: unknown): RuntimeParseR
     case "start_battle":
     case "reset_round":
     case "unlock_position":
-      return only([]) ? { ok: true, value: { ...base, command: name } } as RuntimeParseResult : { code: "POSITION_INVALID", ok: false };
+      return only([]) ? { ok: true, value: { ...base, command: name } } : { code: "POSITION_INVALID", ok: false };
     case "select_character":
       return only(["characterId", "colorId"])
         && isOneOf(payload.characterId, CHARACTER_IDS)
@@ -174,7 +193,7 @@ export function isPrivateEventPayload<Name extends PrivateEventName>(name: Name,
   if (!isRecord(value)) return false;
   switch (name) {
     case "command_accepted":
-      return hasExactKeys(value, ["command", "commandId", "roundId", "serverNow"]) && isOneOf(value.command, ["attack", "configure_arena", "localization_changed", "lock_position", "ready_changed", "reset_round", "select_character", "select_quiz_template", "set_combat_included", "start_battle", "start_quiz", "unlock_position", "quiz_answer"]) && typeof value.commandId === "string" && isPositiveInteger(value.roundId) && finite(value.serverNow);
+      return hasExactKeys(value, ["command", "commandId", "roundId", "serverNow"]) && isOneOf(value.command, COMMAND_NAMES) && typeof value.commandId === "string" && isPositiveInteger(value.roundId) && finite(value.serverNow);
     case "quiz_answer_accepted":
       return hasExactKeys(value, ["acceptedAt", "commandId", "questionId", "roundId"]) && finite(value.acceptedAt) && typeof value.commandId === "string" && typeof value.questionId === "string" && isPositiveInteger(value.roundId);
     case "quiz_answer_result":
@@ -192,8 +211,6 @@ export interface ClientEventPayloads extends PrivateEventPayloads {
 }
 
 export type ClientEventName = keyof ClientEventPayloads;
-
-const ERROR_CODES: readonly ErrorCode[] = ["ANSWER_DUPLICATE", "ANSWER_LATE", "ANSWER_OPTION_INVALID", "ARENA_RADIUS_INVALID", "ATTACK_COOLDOWN", "ATTACK_DIRECTION_INVALID", "ATTACK_NOT_ALLOWED", "BATTLE_START_BLOCKED", "CLIENT_VERSION_UNSUPPORTED", "COMMAND_DUPLICATE", "NICKNAME_INVALID", "NOT_LOCALIZED", "PHASE_MISMATCH", "POSITION_IN_MARKER_EXCLUSION", "POSITION_INVALID", "POSITION_OUT_OF_BOUNDS", "QUESTION_MISMATCH", "QUIZ_NOT_READY", "RATE_LIMITED", "ROLE_FORBIDDEN", "ROOM_FULL", "ROOM_ID_EXHAUSTED", "ROOM_NOT_FOUND", "ROOM_NOT_JOINABLE", "ROUND_MISMATCH", "SESSION_EXPIRED", "SPACING_VIOLATION", "WEAPON_INVALID"];
 
 function isSafeErrorDetails(value: unknown): boolean {
   if (!isRecord(value)) return false;
@@ -224,18 +241,16 @@ function isBoolean(value: unknown): value is boolean {
 }
 
 function isNonNegativeInteger(value: unknown): value is number {
-  return Number.isInteger(value) && (value as number) >= 0;
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
 }
 
 function isPositiveInteger(value: unknown): value is number {
-  return Number.isInteger(value) && (value as number) >= 1;
+  return typeof value === "number" && Number.isInteger(value) && value >= 1;
 }
 
 function isOneOf<Value extends string>(value: unknown, values: readonly Value[]): value is Value {
-  return typeof value === "string" && values.includes(value as Value);
+  return typeof value === "string" && values.some((candidate) => candidate === value);
 }
-
-export type PublicRoomPhase = Exclude<RoomPhase, "arena-setup" | "quiz-results">;
 
 export interface OrganizerPublicState {
   readonly connected: boolean;
@@ -302,7 +317,7 @@ export interface PublicRoomState {
   readonly battle: BattlePublicState;
   readonly eventSequence: number;
   readonly organizer: OrganizerPublicState;
-  readonly phase: PublicRoomPhase;
+  readonly phase: RoomPhase;
   readonly players: Readonly<Record<PlayerId, PlayerPublicState>>;
   readonly protocolVersion: ProtocolVersion;
   readonly quiz: QuizPublicState;

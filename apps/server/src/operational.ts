@@ -1,6 +1,6 @@
 import { createServer, type Server, type ServerResponse } from "node:http";
+import { PROTOCOL_VERSION } from "@codexwars/shared";
 
-const PROTOCOL_VERSION = 1 as const;
 const SERVICE_NAME = "codexwars-server";
 
 export interface OperationalDependencies {

@@ -1,17 +1,18 @@
-import { Client, type Room } from "@colyseus/sdk";
 import {
   PROTOCOL_VERSION,
   isClientEventPayload,
   isPublicRoomStateProjection,
   type CharacterSelection,
   type ClientEventPayloads,
-  type CommandName,
+  type CommandEnvelope,
   type LocalizationState,
   type PlayerId,
   type PublicRoomState,
 } from "@codexwars/shared";
-import { getRealtimeServerUrl } from "../../config/app";
+import { WarRoomCommandError } from "./errors";
 import type { WarRoomRole, WarRoomSession } from "./types";
+
+export { WarRoomCommandError, type WarRoomErrorCode } from "./errors";
 
 export type Unsubscribe = () => void;
 
@@ -75,17 +76,6 @@ interface PendingCommand {
 const COMMAND_TIMEOUT_MS = 8_000;
 let commandSequence = 0;
 
-export class WarRoomCommandError extends Error {
-  constructor(
-    message: string,
-    readonly code: ClientEventPayloads["server_error"]["code"],
-    readonly retryable: boolean,
-  ) {
-    super(message);
-    this.name = "WarRoomCommandError";
-  }
-}
-
 class ColyseusWarRoomClient implements WarRoomRealtimeClient {
   private disposed = false;
   private readonly listeners = new Set<(snapshot: WarRoomSnapshot) => void>();
@@ -104,9 +94,9 @@ class ColyseusWarRoomClient implements WarRoomRealtimeClient {
       transport.onMessage("server_error", (payload) => this.receiveServerError(payload)),
       transport.onDrop(() => this.updateConnection(false)),
       transport.onReconnect(() => this.updateConnection(true)),
-      transport.onError((code, message) => this.setError(new Error(message || `Realtime connection error ${code}`))),
-      transport.onLeave((code) => {
-        if (!this.disposed) this.setError(new Error(`War Room session ended (${code}). Return home or rejoin with the room code.`));
+      transport.onError(() => this.setError(new WarRoomCommandError("The War Room connection was interrupted. Reconnecting may resolve it.", "CONNECTION_FAILED", true))),
+      transport.onLeave(() => {
+        if (!this.disposed) this.setError(new WarRoomCommandError("This War Room session has ended. Join again with the room code.", "SESSION_EXPIRED", false));
         this.updateConnection(false);
       }),
     ];
@@ -229,20 +219,6 @@ export async function attachWarRoomRealtimeClient({
   }
 }
 
-export async function createOrganizerWarRoom(organizerName: string): Promise<WarRoomRealtimeClient> {
-  const client = new Client(getRealtimeServerUrl());
-  const room = await client.create("war", { displayName: organizerName, protocolVersion: PROTOCOL_VERSION });
-  return attachWarRoomRealtimeClient({ nickname: organizerName, role: "organizer", transport: new ColyseusRoomTransport(room) });
-}
-
-export async function joinParticipantWarRoom(roomCode: string, nickname: string): Promise<WarRoomRealtimeClient> {
-  const normalizedRoomCode = roomCode.trim();
-  if (!/^\d{4}$/u.test(normalizedRoomCode)) throw new Error("Enter the four-digit War Room code.");
-  const client = new Client(getRealtimeServerUrl());
-  const room = await client.joinById(normalizedRoomCode, { displayName: nickname, protocolVersion: PROTOCOL_VERSION });
-  return attachWarRoomRealtimeClient({ nickname, role: "participant", transport: new ColyseusRoomTransport(room) });
-}
-
 async function requestSessionIdentity(
   transport: RealtimeTransport,
   expectedRole: WarRoomRole,
@@ -287,7 +263,7 @@ function commandPayload(
   intent: WarRoomIntent,
   commandId: string,
   roundId: number,
-): { readonly name: CommandName; readonly payload: Record<string, unknown> } {
+): CommandEnvelope {
   const meta = { commandId, roundId };
   switch (intent.type) {
     case "set_combat_included": return { name: intent.type, payload: { ...meta, included: intent.included, playerId: intent.playerId } };
@@ -309,58 +285,4 @@ function commandPayload(
 function createCommandId(): string {
   commandSequence += 1;
   return `${Date.now().toString(36)}-${commandSequence.toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function plainState(state: unknown): unknown {
-  if (typeof state !== "object" || state === null || !("toJSON" in state)) return state;
-  const toJSON = (state as { readonly toJSON?: unknown }).toJSON;
-  return typeof toJSON === "function" ? toJSON.call(state) : state;
-}
-
-class ColyseusRoomTransport implements RealtimeTransport {
-  constructor(private readonly room: Room) {}
-
-  get roomId(): string {
-    return this.room.roomId;
-  }
-
-  async leave(): Promise<void> {
-    await this.room.leave(true);
-  }
-
-  onDrop(listener: () => void): Unsubscribe {
-    this.room.onDrop(listener);
-    return () => this.room.onDrop.remove(listener);
-  }
-
-  onError(listener: (code: number, message: string) => void): Unsubscribe {
-    const receive = (code: number, message?: string): void => listener(code, message ?? "");
-    this.room.onError(receive);
-    return () => this.room.onError.remove(receive);
-  }
-
-  onLeave(listener: (code: number) => void): Unsubscribe {
-    this.room.onLeave(listener);
-    return () => this.room.onLeave.remove(listener);
-  }
-
-  onMessage(type: string, listener: (payload: unknown) => void): Unsubscribe {
-    return this.room.onMessage(type, listener);
-  }
-
-  onReconnect(listener: () => void): Unsubscribe {
-    this.room.onReconnect(listener);
-    return () => this.room.onReconnect.remove(listener);
-  }
-
-  onStateChange(listener: (state: unknown) => void): Unsubscribe {
-    const receive = (state: unknown): void => listener(plainState(state));
-    this.room.onStateChange(receive);
-    receive(this.room.state);
-    return () => this.room.onStateChange.remove(receive);
-  }
-
-  send(type: string, payload: unknown): void {
-    this.room.send(type, payload);
-  }
 }

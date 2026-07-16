@@ -2,71 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { PublicRoomState } from "@codexwars/shared";
 import {
   attachWarRoomRealtimeClient,
-  type RealtimeTransport,
-  type Unsubscribe,
 } from "./realtimeClient";
-
-type MessageListener = (payload: unknown) => void;
-
-class FakeTransport implements RealtimeTransport {
-  readonly roomId = "0427";
-  readonly sent: Array<{ readonly payload: unknown; readonly type: string }> = [];
-  leaveCalls = 0;
-  private readonly dropListeners = new Set<() => void>();
-  private readonly errorListeners = new Set<(code: number, message: string) => void>();
-  private readonly leaveListeners = new Set<(code: number) => void>();
-  private readonly messageListeners = new Map<string, Set<MessageListener>>();
-  private readonly reconnectListeners = new Set<() => void>();
-  private readonly stateListeners = new Set<(state: unknown) => void>();
-
-  async leave(): Promise<void> {
-    this.leaveCalls += 1;
-  }
-
-  onDrop(listener: () => void): Unsubscribe {
-    this.dropListeners.add(listener);
-    return () => this.dropListeners.delete(listener);
-  }
-
-  onError(listener: (code: number, message: string) => void): Unsubscribe {
-    this.errorListeners.add(listener);
-    return () => this.errorListeners.delete(listener);
-  }
-
-  onLeave(listener: (code: number) => void): Unsubscribe {
-    this.leaveListeners.add(listener);
-    return () => this.leaveListeners.delete(listener);
-  }
-
-  onMessage(type: string, listener: MessageListener): Unsubscribe {
-    const listeners = this.messageListeners.get(type) ?? new Set<MessageListener>();
-    listeners.add(listener);
-    this.messageListeners.set(type, listeners);
-    return () => listeners.delete(listener);
-  }
-
-  onReconnect(listener: () => void): Unsubscribe {
-    this.reconnectListeners.add(listener);
-    return () => this.reconnectListeners.delete(listener);
-  }
-
-  onStateChange(listener: (state: unknown) => void): Unsubscribe {
-    this.stateListeners.add(listener);
-    return () => this.stateListeners.delete(listener);
-  }
-
-  send(type: string, payload: unknown): void {
-    this.sent.push({ payload, type });
-  }
-
-  emitMessage(type: string, payload: unknown): void {
-    for (const listener of this.messageListeners.get(type) ?? []) listener(payload);
-  }
-
-  emitState(state: unknown): void {
-    for (const listener of this.stateListeners) listener(state);
-  }
-}
+import { FakeRealtimeTransport } from "./test-support/fakeRealtimeTransport";
 
 const roomState: PublicRoomState = {
   arena: { configured: true, markerExclusionRadiusM: 0.5, minimumSpacingM: 1.5, radiusM: 3 },
@@ -121,7 +58,7 @@ const roomState: PublicRoomState = {
 
 describe("WarRoomRealtimeClient", () => {
   it("binds server identity, validates synchronized state, and acknowledges exact commands", async () => {
-    const transport = new FakeTransport();
+    const transport = new FakeRealtimeTransport();
     const attaching = attachWarRoomRealtimeClient({ nickname: "Ada", role: "participant", transport });
 
     expect(transport.sent).toEqual([{ payload: { protocolVersion: 1 }, type: "request_session" }]);
@@ -153,7 +90,7 @@ describe("WarRoomRealtimeClient", () => {
   });
 
   it("rejects authority-shaped state and correlated server errors", async () => {
-    const transport = new FakeTransport();
+    const transport = new FakeRealtimeTransport();
     const attaching = attachWarRoomRealtimeClient({ nickname: "Ada", role: "participant", transport });
     transport.emitMessage("session_ready", { playerId: "player-1", role: "participant" });
     const client = await attaching;
@@ -175,12 +112,26 @@ describe("WarRoomRealtimeClient", () => {
   });
 
   it("closes the reserved seat when server identity does not match the requested role", async () => {
-    const transport = new FakeTransport();
+    const transport = new FakeRealtimeTransport();
     const attaching = attachWarRoomRealtimeClient({ nickname: "Ada", role: "participant", transport });
 
     transport.emitMessage("session_ready", { playerId: null, role: "organizer" });
 
     await expect(attaching).rejects.toThrow("role did not match");
     expect(transport.leaveCalls).toBe(1);
+  });
+
+  it("normalizes active connection errors without exposing SDK messages", async () => {
+    const transport = new FakeRealtimeTransport();
+    const attaching = attachWarRoomRealtimeClient({ nickname: "Ada", role: "participant", transport });
+    transport.emitMessage("session_ready", { playerId: "player-1", role: "participant" });
+    const client = await attaching;
+
+    transport.emitError(4_211, "private dependency failure");
+    expect(client.getSnapshot().error).toMatchObject({ code: "CONNECTION_FAILED", retryable: true });
+    expect(client.getSnapshot().error?.message).not.toContain("private dependency failure");
+
+    transport.emitLeave(4_000);
+    expect(client.getSnapshot().error).toMatchObject({ code: "SESSION_EXPIRED", retryable: false });
   });
 });

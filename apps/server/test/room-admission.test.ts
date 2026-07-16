@@ -4,6 +4,7 @@ import type { Room as ClientRoom } from "@colyseus/sdk";
 import { PROGRAMMING_FUNDAMENTALS_V1 } from "@codexwars/shared";
 import appConfig, { createAppConfig } from "../src/app.config.js";
 import { setWarRoomDependenciesForTest } from "../src/rooms/war-room.js";
+import { WarRoomHarness } from "./support/war-room-harness.js";
 
 let colyseus: ColyseusTestServer;
 let rehearsalBaseline: string | undefined;
@@ -34,9 +35,9 @@ describe("War Room admission", () => {
   });
 
   it("binds the creator as a separate organizer and normalizes a participant nickname", async () => {
-    const room = await colyseus.createRoom("war", { displayName: "Teacher", protocolVersion: 1 });
-    await colyseus.connectTo(room, { displayName: "Teacher", protocolVersion: 1 });
-    await colyseus.connectTo(room, { displayName: "  Ada\tLovelace  ", protocolVersion: 1 });
+    const harness = await WarRoomHarness.create(colyseus);
+    await harness.joinParticipant("  Ada\tLovelace  ");
+    const { room } = harness;
 
     expect(room.roomId).toMatch(/^\d{4}$/);
     expect(room.state.organizer.displayName).toBe("Teacher");
@@ -46,9 +47,9 @@ describe("War Room admission", () => {
   });
 
   it("returns the server-bound role and player identity on request", async () => {
-    const room = await colyseus.createRoom("war", { displayName: "Teacher", protocolVersion: 1 });
-    const organizer = await colyseus.connectTo(room, { displayName: "Teacher", protocolVersion: 1 });
-    const participant = await colyseus.connectTo(room, { displayName: "Ada", protocolVersion: 1 });
+    const harness = await WarRoomHarness.create(colyseus);
+    const participant = await harness.joinParticipant("Ada");
+    const { organizer, room } = harness;
     const playerId = [...room.state.players.keys()][0]!;
 
     const organizerIdentity = organizer.waitForMessage("session_ready");
@@ -61,9 +62,9 @@ describe("War Room admission", () => {
   });
 
   it("synchronizes an approved cosmetic selection without changing Battle Stats", async () => {
-    const room = await colyseus.createRoom("war", { displayName: "Teacher", protocolVersion: 1 });
-    await colyseus.connectTo(room, { displayName: "Teacher", protocolVersion: 1 });
-    const participant = await colyseus.connectTo(room, { displayName: "Ada", protocolVersion: 1 });
+    const harness = await WarRoomHarness.create(colyseus);
+    const participant = await harness.joinParticipant("Ada");
+    const { room } = harness;
     const playerId = [...room.state.players.keys()][0]!;
     const before = room.state.players.get(playerId)!;
     const battleStats = {
@@ -75,13 +76,12 @@ describe("War Room admission", () => {
       weaponId: before.weaponId
     };
 
-    participant.send("select_character", {
+    await harness.sendAndPatch(participant, "select_character", {
       characterId: "wizard",
       colorId: "violet",
       commandId: "select-wizard",
       roundId: room.state.roundId
     });
-    await room.waitForNextPatch();
 
     expect(room.state.players.get(playerId)).toMatchObject({
       characterColorId: "violet",
@@ -91,30 +91,25 @@ describe("War Room admission", () => {
   });
 
   it("removes an intentional participant leave instead of retaining a ghost record", async () => {
-    const room = await colyseus.createRoom("war", { displayName: "Teacher", protocolVersion: 1 });
-    await colyseus.connectTo(room, { displayName: "Teacher", protocolVersion: 1 });
-    const participant = await colyseus.connectTo(room, { displayName: "Ada", protocolVersion: 1 });
+    const harness = await WarRoomHarness.create(colyseus);
+    const participant = await harness.joinParticipant("Ada");
 
     await participant.leave();
-    await room.waitForNextPatch();
+    await harness.waitForPatch();
 
-    expect(room.state.players.size).toBe(0);
+    expect(harness.room.state.players.size).toBe(0);
   });
 
   it("restores an unexpectedly disconnected participant with the same player record", async () => {
-    const room = await colyseus.createRoom("war", { displayName: "Teacher", protocolVersion: 1 });
-    await colyseus.connectTo(room, { displayName: "Teacher", protocolVersion: 1 });
-    const participant = await colyseus.connectTo(room, { displayName: "Ada", protocolVersion: 1 });
+    const harness = await WarRoomHarness.create(colyseus);
+    const participant = await harness.joinParticipant("Ada");
+    const { room } = harness;
     const playerId = [...room.state.players.keys()][0];
-    const reconnectionToken = participant.reconnectionToken;
 
-    participant.reconnection.enabled = false;
-    participant.connection.close();
-    await room.waitForNextPatch();
+    const reconnectionToken = await harness.disconnectUnexpectedly(participant);
     expect(room.state.players.get(playerId)?.connected).toBe(false);
 
-    const resumed = await colyseus.sdk.reconnect(reconnectionToken);
-    await room.waitForNextPatch();
+    const resumed = await harness.reconnect(reconnectionToken);
 
     expect(room.state.players.size).toBe(1);
     expect(room.state.players.get(playerId)?.connected).toBe(true);
@@ -122,18 +117,14 @@ describe("War Room admission", () => {
   });
 
   it("restores organizer authority without transferring it to participants", async () => {
-    const room = await colyseus.createRoom("war", { displayName: "Teacher", protocolVersion: 1 });
-    const organizer = await colyseus.connectTo(room, { displayName: "Teacher", protocolVersion: 1 });
-    await colyseus.connectTo(room, { displayName: "Ada", protocolVersion: 1 });
-    const reconnectionToken = organizer.reconnectionToken;
+    const harness = await WarRoomHarness.create(colyseus);
+    await harness.joinParticipant("Ada");
+    const { organizer, room } = harness;
 
-    organizer.reconnection.enabled = false;
-    organizer.connection.close();
-    await room.waitForNextPatch();
+    const reconnectionToken = await harness.disconnectUnexpectedly(organizer);
     expect(room.state.organizer.connected).toBe(false);
 
-    const resumedOrganizer = await colyseus.sdk.reconnect(reconnectionToken);
-    await room.waitForNextPatch();
+    const resumedOrganizer = await harness.reconnect(reconnectionToken);
     expect(room.state.organizer.connected).toBe(true);
 
     resumedOrganizer.send("start_quiz", { commandId: "organizer-resumed", roundId: room.state.roundId });
@@ -145,12 +136,10 @@ describe("War Room admission", () => {
     const logs: unknown[] = [];
     const restoreDependencies = setWarRoomDependenciesForTest({ log: (entry) => logs.push(entry) });
     try {
-      const room = await colyseus.createRoom("war", { displayName: "Teacher Secret", protocolVersion: 1 });
-      await colyseus.connectTo(room, { displayName: "Teacher Secret", protocolVersion: 1 });
-      const participant = await colyseus.connectTo(room, { displayName: "Ada Secret", protocolVersion: 1 });
+      const harness = await WarRoomHarness.create(colyseus, "Teacher Secret");
+      const participant = await harness.joinParticipant("Ada Secret");
 
-      participant.send("attack", { commandId: "blocked-attack", dirX: 1, dirZ: 0, roundId: 1, weaponId: "bolt" });
-      await room.waitForNextPatch();
+      await harness.sendAndPatch(participant, "attack", { commandId: "blocked-attack", dirX: 1, dirZ: 0, roundId: 1, weaponId: "bolt" });
 
       expect(logs).toEqual([{
         correlationId: "blocked-attack",
@@ -170,18 +159,18 @@ describe("War Room admission", () => {
     const startedAt = Date.now();
     const restoreDependencies = setWarRoomDependenciesForTest({ log: () => undefined, now: () => now });
     try {
-      const room = await colyseus.createRoom("war", { displayName: "Teacher", protocolVersion: 1 });
-      let organizer: ClientRoom = await colyseus.connectTo(room, { displayName: "Teacher", protocolVersion: 1 });
+      const harness = await WarRoomHarness.create(colyseus);
+      const { room } = harness;
+      let organizer: ClientRoom = harness.organizer;
       const participants: ClientRoom[] = [];
       for (let index = 0; index < 12; index += 1) {
-        participants.push(await colyseus.connectTo(room, { displayName: index < 2 ? "Ada" : `Player ${index + 1}`, protocolVersion: 1 }));
+        participants.push(await harness.joinParticipant(index < 2 ? "Ada" : `Player ${index + 1}`));
       }
       expect(room.state.players.size).toBe(12);
       expect([...room.state.players.values()][1]?.displayName).toBe("Ada (2)");
 
-      let command = 0;
-      const metadata = () => ({ commandId: `cmd-${command++}`, roundId: room.state.roundId });
-      const waitForPatch = async (): Promise<void> => room.waitForNextPatch();
+      const metadata = () => harness.command();
+      const waitForPatch = async (): Promise<void> => harness.waitForPatch();
 
       for (const player of [...room.state.players.values()].slice(2)) {
         organizer.send("set_combat_included", { ...metadata(), included: false, playerId: player.playerId });
@@ -229,25 +218,17 @@ describe("War Room admission", () => {
       const secondPlayerId = [...room.state.players.values()][1]?.playerId;
       const secondPlayerBeforeDrop = room.state.players.get(secondPlayerId ?? "");
       const secondParticipant = participants[1]!;
-      const participantReconnectionToken = secondParticipant.reconnectionToken;
-      secondParticipant.reconnection.enabled = false;
-      secondParticipant.connection.close();
-      await waitForPatch();
+      const participantReconnectionToken = await harness.disconnectUnexpectedly(secondParticipant);
       expect(room.state.players.get(secondPlayerId ?? "")?.connected).toBe(false);
       expect(room.state.players.get(secondPlayerId ?? "")?.hp).toBe(secondPlayerBeforeDrop?.hp);
-      participants[1] = await colyseus.sdk.reconnect(participantReconnectionToken);
-      await waitForPatch();
+      participants[1] = await harness.reconnect(participantReconnectionToken);
       expect(room.state.players.get(secondPlayerId ?? "")?.connected).toBe(true);
       expect(room.state.players.get(secondPlayerId ?? "")?.positionLocked).toBe(true);
 
       const battleEndsAt = room.state.battle.endsAt;
-      const organizerReconnectionToken = organizer.reconnectionToken;
-      organizer.reconnection.enabled = false;
-      organizer.connection.close();
-      await waitForPatch();
+      const organizerReconnectionToken = await harness.disconnectUnexpectedly(organizer);
       expect(room.state.organizer.connected).toBe(false);
-      organizer = await colyseus.sdk.reconnect(organizerReconnectionToken);
-      await waitForPatch();
+      organizer = await harness.reconnect(organizerReconnectionToken);
       expect(room.state.organizer.connected).toBe(true);
       expect(room.state.battle.endsAt).toBe(battleEndsAt);
 
@@ -284,7 +265,7 @@ describe("War Room admission", () => {
       expect(room.state.roundId).toBe(2);
       expect(room.state.eventSequence).toBe(0);
       console.info(JSON.stringify({
-        commandCount: command,
+        commandCount: harness.commandCount,
         durationMs: Date.now() - startedAt,
         eventCount: completedEventCount,
         failures: 0,
