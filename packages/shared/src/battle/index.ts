@@ -7,7 +7,6 @@ export { consumeWeaponUse, getWeaponReadiness, resolveAttack } from "./combat.js
 export {
   findNearestAimTarget,
   normalizeAimDirection,
-  PLAYER_HIT_RADIUS_M,
   WEAPON_GEOMETRY,
 } from "./geometry.js";
 export type {
@@ -22,7 +21,6 @@ export type {
   QuizPerformance,
   ResolveAttackInput,
   RejectedAttack,
-  WeaponId,
   WeaponReadiness,
   WeaponStats,
   WeaponUseResult,
