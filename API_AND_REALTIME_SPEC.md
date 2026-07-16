@@ -1,15 +1,15 @@
 # CodexWars P0 — API and Realtime Specification
 
 **Status:** Authoritative P0 interface contract
-**Version:** 1.3
+**Version:** 1.4
 **Last updated:** 2026-07-16
 **Applies to:** M1 hackathon vertical slice
 
 This document is the sole prose authority for P0 room admission, synchronized state, commands, events, errors, timing, ordering, and reconnection. It implements, but does not repeat, the product and structural decisions in:
 
-- `PRD.md` v2.5
+- `PRD.md` v2.6
 - `BUILD_SPEC.md` v1.5
-- `ARCHITECTURE.md` v1.2
+- `ARCHITECTURE.md` v1.3
 
 If this contract conflicts with one of those documents, stop implementation and resolve the documents together. Do not silently add a second source of truth.
 
@@ -17,7 +17,7 @@ If this contract conflicts with one of those documents, stop implementation and 
 
 ## 1. Contract scope
 
-- Sessions are nickname-only and in-memory; P0 has no account, token-verification, persistence, or runtime-cloud interface.
+- Sessions are nickname-only and in-memory; P0 has no application account/JWT service, persistence, or runtime-cloud interface. Colyseus still validates its short-lived seat and reconnection tokens.
 - Colyseus matchmaking owns admission. Its four-digit `roomId` is the public code.
 - The server binds one non-combat organizer and up to 12 participant records; role and player authority never come from command payloads.
 - Schema state is recovery truth. Messages carry commands, acknowledgements, errors, and transient effects.
@@ -37,7 +37,7 @@ The deployment topology is defined in `ARCHITECTURE.md`. This section defines on
 | Colyseus matchmaking | Create a War Room, reserve/consume a seat, or join by `roomId` |
 | Colyseus Schema | Recoverable synchronized room state |
 | Colyseus messages | Validated commands, acknowledgements, errors, and transient effects |
-| Local mobile storage | Server URL and the current short-lived reconnection token only |
+| Mobile process memory | Connected room/session data and the SDK's current short-lived reconnection token; P0 does not persist it across an app restart |
 
 There is no REST polling for lobby, quiz, positions, HP, results, or room discovery. P0 configures Schema patches at 100 ms (10 Hz); discrete authoritative events are sent immediately.
 
@@ -64,9 +64,12 @@ Returns `200` after Colyseus initialization and room registration complete; othe
 ```json
 {
   "status": "ready",
+  "service": "codexwars-server",
   "protocolVersion": 1
 }
 ```
+
+The `503` body uses the same fields with `status: "starting"`.
 
 P0 readiness has no Firebase/Firestore check.
 
@@ -172,7 +175,7 @@ type EventSequence = number;// server-generated, monotonic within a round
 
 ### 4.1 Command envelope
 
-All mutating in-room commands carry a `commandId`. Round-scoped commands also carry the current `roundId`.
+All mutating in-room commands carry a `commandId` and the current `roundId`.
 
 ```ts
 type CommandMeta = {
@@ -181,7 +184,7 @@ type CommandMeta = {
 };
 ```
 
-The server stores the outcome of every accepted mutating command in a per-client, per-round cache capped at 512 entries with no within-round eviction. A repeated `commandId` returns the stored outcome without mutation. Reaching the cap rejects new mutating commands with `RATE_LIMITED` until reset.
+The server stores the outcome of every accepted mutating command except `reset_round` in a per-client, per-round cache capped at 512 entries with no within-round eviction. A repeated `commandId` returns the stored acknowledgement without mutation. Reset increments the round before acknowledging, so replaying its old envelope fails the new-round check. Reaching the cap rejects new mutating commands with `RATE_LIMITED` until reset.
 
 Reset increments `roundId`, clears command deduplication, and resets `eventSequence` to zero. A client ignores state-derived effects and events from an older round or an already-applied sequence.
 
@@ -261,7 +264,7 @@ type PlayerPublicState = {
   hp: number;
   shield: number;
   weaponId: "bolt";
-  charges: number;              // -1 represents unlimited
+  charges: -1;                  // unlimited Bolt in P0
   nextAttackAt: number;
   eliminated: boolean;
   disconnectedAt: number;
@@ -274,7 +277,6 @@ Selected answers, unrevealed answer keys, reconnection tokens, raw join options,
 
 ```ts
 type QuizStatus =
-  | "unconfigured"
   | "ready"
   | "question"
   | "reveal"
@@ -285,7 +287,7 @@ type PublicQuizQuestion = {
   order: number;
   prompt: string;
   options: Array<{ id: string; label: string }>;
-  difficulty: "basic" | "intermediate" | "difficult";
+  difficulty: "" | "basic" | "intermediate" | "difficult";
   durationMs: number;
 };
 
@@ -294,7 +296,7 @@ type QuizPublicState = {
   status: QuizStatus;
   questionIndex: number;        // -1 before the first question
   questionCount: 10;
-  currentQuestion?: PublicQuizQuestion;
+  currentQuestion: PublicQuizQuestion; // empty fields/options before and after an active question
   questionEndsAt: number;
   revealEndsAt: number;
   revealedCorrectOptionId: string; // empty during question
@@ -344,15 +346,14 @@ All combat positions come from `players` where `combatIncluded && positionLocked
 
 After a client has joined, every handler performs this order:
 
-1. resolve the sender's server-bound room role/player record;
-2. validate expected role;
-3. validate current `roundId` and unseen `commandId`;
-4. validate room/quiz/battle phase;
-5. validate payload shape and bounds;
-6. validate domain invariants;
-7. mutate authoritative private/state data exactly once;
-8. increment `eventSequence` for authoritative effects where required;
-9. acknowledge the sender and/or broadcast an event.
+1. parse the exact payload shape and basic bounds;
+2. resolve the sender's server-bound organizer/player record;
+3. validate `roundId`, replay the cached acknowledgement for a known `commandId`, and enforce raw/per-round limits;
+4. validate the expected server-bound role;
+5. validate room/quiz/battle phase and domain invariants;
+6. mutate authoritative private/state data exactly once;
+7. increment `eventSequence` for authoritative effects where required;
+8. acknowledge the sender and/or broadcast an event.
 
 Validation failure performs no partial mutation.
 
@@ -582,7 +583,7 @@ type ServerError = {
   code: ErrorCode;
   message: string;
   retryable: boolean;
-  details?: unknown;
+  details?: Record<string, unknown>;
 };
 ```
 
@@ -686,7 +687,7 @@ Do not log or include reconnection tokens in analytics, errors, or synchronized 
 ### 8.3 Organizer disconnect policy
 
 - Before countdown: keep the phase unchanged and disable organizer-only commands for 60 seconds. Grace expiry closes the in-memory room.
-- During countdown/battle: timers and combat continue; organizer controls remain unavailable until reconnection.
+- During countdown/battle: timers and combat continue; the organizer may reconnect to the same role for 20 seconds. Token expiry does not pause or close the active match, and organizer controls remain unavailable for the rest of that round.
 - The organizer role never transfers automatically to a participant in P0.
 
 ### 8.4 Room expiry and restart
@@ -697,7 +698,7 @@ Rooms expire after two hours without a successful join, reconnect, or accepted i
 
 ## 9. Error catalogue
 
-Matchmaking errors are translated by `apps/mobile/src/features/warRoom/realtimeClient.ts` into the same app-level error shape used for room messages.
+Matchmaking rejections originate from Colyseus lifecycle errors, while in-room failures use the structured `server_error` payload above. The current mobile adapter validates four-digit syntax locally but otherwise surfaces the SDK matchmaking error directly; normalizing those errors into `WarRoomCommandError` is still required before the M1 rehearsal.
 
 | Code | Surface | Meaning | Retryable |
 |---|---|---|---|
@@ -710,7 +711,7 @@ Matchmaking errors are translated by `apps/mobile/src/features/warRoom/realtimeC
 | `SESSION_EXPIRED` | Reconnect | Token or room no longer exists | No; return home |
 | `ROLE_FORBIDDEN` | Message | Server-bound role cannot perform command | No |
 | `ROUND_MISMATCH` | Message | Command belongs to another round | No; resync |
-| `COMMAND_DUPLICATE` | Message | Command already processed | No action needed |
+| `COMMAND_DUPLICATE` | Reserved | Declared for compatibility but not emitted in P0; an exact replay receives the cached `command_accepted` acknowledgement | No action needed |
 | `PHASE_MISMATCH` | Message | Command is illegal in current phase | Usually no |
 | `QUIZ_NOT_READY` | Message | Quiz start precondition failed | Yes |
 | `QUESTION_MISMATCH` | Message | Answer references another question | No |
@@ -741,7 +742,7 @@ The LAN demo does not need internet-grade account abuse controls, but it still n
 - Hosted matchmaking throttles are deferred to the required M3 threat-model review; the P0 LAN server applies no per-IP admission quota.
 - `quiz_answer`: one accepted answer and at most five malformed attempts per participant/question.
 - Localization, position, and readiness commands: maximum 5/s per client.
-- `attack`: weapon cooldown is authoritative; cap raw attempts at 10/s and disconnect persistent abuse.
+- `attack`: weapon cooldown is authoritative; cap raw attempts at 10/s and reject excess attempts with `RATE_LIMITED`.
 - Maximum room command payload: 2 KiB.
 - Display names are normalized, rendered as text, never used as identifiers, and suffixed server-side on duplicates.
 - Logs use correlation ID, hashed room ID, player ID, event type, and stable error code.
@@ -803,7 +804,7 @@ Room-code enumeration resistance becomes important for an internet-hosted produc
 ### 11.5 Reconnection and load
 
 - Participant reconnect within 20 seconds restores state; timeout eliminates once.
-- Organizer reconnect within pre-battle 60 seconds restores controls; timeout closes room.
+- Organizer reconnect within the pre-battle 60-second grace restores controls; timeout closes the room. During countdown/battle the reconnect window is 20 seconds and expiry does not interrupt the match.
 - Server restart produces explicit session-ended UX rather than infinite reconnect.
 - Missed/duplicate events recover from Schema state and ordering fields.
 - Twelve participants can answer near the same deadline.

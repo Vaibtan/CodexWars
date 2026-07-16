@@ -13,8 +13,9 @@ and development-build setup.
   adding a native module. Use `npx expo install <package>` rather than a plain
   `npm install` for Expo/RN native packages, so Expo selects SDK-compatible
   versions.
-- ViroReact is installed for the M0 AR scaffold. Keep every Viro import inside
-  `src/ar/`; Expo Go cannot run this app, so use a native development client.
+- ViroReact powers the shared marker-space AR implementation. Keep every Viro
+  import inside `src/ar/`; Expo Go cannot run this app, so use a native
+  development client.
 
 ## Structure and ownership
 
@@ -62,14 +63,15 @@ The health endpoint is `http://localhost:4000/health`.
 2. Set `ANDROID_HOME` and add Android `platform-tools` to `PATH`.
 3. Use a physical ARCore-capable Android device for AR work; emulators are not
    an AR tracking substitute.
-4. Install the shared development build created by:
+4. Create and install a local development build with `npx expo run:android`, or
+   install a shared development build created by:
 
    ```bash
    cd apps/mobile
    eas build --platform android --profile development
    ```
 
-6. Keep the phone and Metro host on the same LAN/hotspot. Do not hardcode a
+5. Keep the phone and Metro host on the same LAN/hotspot. Do not hardcode a
    laptop IP address in source code.
 
 ## macOS + iPhone
@@ -109,6 +111,8 @@ From the repository root, run:
 ```bash
 npm run typecheck
 npm test
+npm run test:bundle:android --workspace @codexwars/mobile
+npx expo-doctor apps/mobile
 ```
 
 Consult `docs/PLATFORM_TESTING.md` for the full cross-platform release gate and

@@ -1,5 +1,8 @@
 # Product
 
+This mobile UI and brand brief is derived from the root `PRD.md`. It does not
+own game rules, protocol fields, milestone scope, or implementation status.
+
 ## Register
 
 product

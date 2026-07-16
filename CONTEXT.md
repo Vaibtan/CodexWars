@@ -61,7 +61,7 @@ A validated, stationary participant location on the marker-relative two-dimensio
 _Avoid_: Live position, GPS position, 3D position
 
 **Attack Request**:
-A participant's discrete request to fire a weapon in a normalized two-dimensional direction.
+A participant's discrete request to fire a weapon in a finite two-dimensional direction; the War Room validates and normalizes it before resolution.
 _Avoid_: Hit, projectile, shot result
 
 **Attack Resolution**:
@@ -69,7 +69,7 @@ The War Room's authoritative decision for an Attack Request, including target, d
 _Avoid_: Client hit, collision event
 
 **Battle Event**:
-An immutable, ordered record of an accepted room, readiness, attack, damage, elimination, or battle-completion change within one War Room.
+An immutable, ordered transient notification for countdown start, attack resolution, elimination, or battle completion within one War Room. Persistent readiness and combat values reconcile from synchronized state instead.
 _Avoid_: Log message, client update, mutable action
 
 **Battle Snapshot**:

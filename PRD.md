@@ -1,6 +1,6 @@
 # CodexWars — Product Requirements Document
 
-**Version:** 2.5
+**Version:** 2.6
 **Status:** Approved product direction — exact implementation contracts live in `BUILD_SPEC.md`, `ARCHITECTURE.md`, `API_AND_REALTIME_SPEC.md`, and `docs/AR_IMPLEMENTATION_SPEC.md`; archived documents are historical only
 **Horizons:** Hackathon demo first → evolve into a real product
 **Primary platforms:** Android and iOS (both required for P0; iOS iterates through EAS cloud development builds and is rehearsed through TestFlight on physical iPhones)
@@ -22,15 +22,15 @@ These decisions were made after researching the July 2026 AR landscape and the h
 
 | # | Decision | Rationale |
 |---|---|---|
-| D1 | **Marker-based colocation replaces ARCore Cloud Anchors** as the shared-origin mechanism. A printed image marker on the floor is the arena origin; every phone scans it. | The hosted spatial-anchor market collapsed in 2024–2026 (Azure Spatial Anchors retired Nov 2024; Niantic Lightship Shared AR shut down May 2026; 8th Wall hosted service ended Feb 2026). Google Cloud Anchors survives but is in maintenance mode. Marker colocation needs no third-party spatial cloud, is cross-platform, more predictable in feature-poor rooms, and is what indie colocated-AR projects have converged on. |
-| D2 | **Keep the stack: React Native + Expo (dev build) + @reactvision/react-viro + Colyseus + TypeScript.** | Viro is actively maintained again (ReactVision spin-out, releases through June 2026, RN New Architecture + current Expo support) and ships the image-marker API (`ViroARImageMarker`) that D1 needs. Colyseus 0.17 (Feb 2026) adds automatic reconnection — a direct fit for mobile churn. One language across app, AR, and server suits a TS-strong solo developer. |
+| D1 | **Marker-based colocation replaces cloud anchors** as the shared-origin mechanism. A printed image marker on the floor is the arena origin; every phone scans it. | Marker colocation avoids a hosted spatial dependency, works on the LAN-only demo topology, is cross-platform, and maps directly to Viro's measured image-target APIs. Physical accuracy remains gated by M0. |
+| D2 | **Keep the stack: React Native + Expo development builds + `@reactvision/react-viro` + Colyseus + TypeScript.** | The pinned stack builds the native Android client, Viro supplies measured image targets and marker-relative rendering, and Colyseus supplies the authoritative room/state/reconnection lifecycle. One language and one shared contract package keep the mobile/server boundary tractable. |
 | D3 | **Android and iOS are both P0 platforms.** Android is developed locally; iOS iterates through EAS cloud development builds and its rehearsal build is distributed through TestFlight to a physical ARKit-compatible iPhone. | The shared React Native codebase and marker-based origin make mixed-platform play a core product claim. Windows cannot build iOS locally, so a paid Apple Developer account, EAS cloud build, registered iPhone, TestFlight configuration, and early device testing are mandatory P0 dependencies. |
 | D4 | **P0 battles are fixed at 60 seconds.** | Sustained camera + AR inference thermally throttles phones, while battery drain and arm fatigue compound it. A fixed duration also keeps one authoritative timer and a repeatable classroom pace. |
 | D5 | **Non-AR fallback mode is a P1 requirement, not an afterthought.** A participant whose phone cannot localize plays the same battle from a top-down minimap view. | Combat is already 2D server-side, so a 2D client view is cheap insurance against device fragmentation. If M0 fails, AR P0 is blocked; switching to a non-AR P0 requires an explicit revised-product decision rather than silently changing scope. |
 | D6 | **Quiz rewards become a budget of choices with catch-up mechanics on the product roadmap** (flat mapping stays for the hackathon MVP). | Gimkit/Blooket research: successful platforms map score to spendable resources plus randomness/steal mechanics. "Quiz winner automatically wins the battle" is a documented failure mode — the battle must favor the quiz winner, not crown them. |
 | D7 | **Privacy-minimal by design: nickname-only joins, no accounts, no camera upload, no third-party ad/analytics SDKs.** | Classroom tools spread teacher-driven and bottom-up; COPPA applies to under-13 users regardless of who consented. Minimal data collection keeps a single teacher able to run a session with zero IT approval. |
 | D8 | **P0 uses three selectable bundled GLB characters with four approved palettes, basic Bolt, and shield-only quiz rewards.** Character and palette choice are cosmetic and never change collision or Battle Stats. Fireball and free spectator view remain post-P0. | The team already produced a bounded local asset catalog, so cosmetic choice can ship without expanding the authoritative combat model or adding remote asset delivery. |
-| D9 | **P0 tracking loss is local and non-pausing during battle.** Before battle it clears readiness. During battle the locked server position survives, but firing is allowed only while the AR module is producing a fresh tracked or inertial pose; a stale/unavailable pose disables firing and shows a re-scan prompt. | A global pause is too disruptive for the vertical slice, but firing from a frozen aim direction would be incorrect and unfair. Organizer-controlled pause/recovery policy is P1. |
+| D9 | **P0 tracking loss is local and non-pausing during battle.** Before battle it clears readiness. During battle the locked server position survives, but firing is allowed only while the retained marker anchor produces a fresh tracked or degraded/inertial pose; marker removal, stale pose, or unavailable world tracking disables firing and shows a re-scan prompt. | A global pause is too disruptive for the vertical slice, but firing from a frozen aim direction would be incorrect and unfair. Organizer-controlled pause/recovery policy is P1. |
 
 ---
 
@@ -82,7 +82,7 @@ These decisions were made after researching the July 2026 AR landscape and the h
 ### 5.1 Organizer flow
 1. **Create War** → receives a four-digit room code, shows it on screen/projector.
 2. Selects the demo quiz (later: authors or generates one).
-3. Places the **arena marker** — a printed A4 sheet (bundled printable PDF; the app can also display the marker on a spare tablet, with a glare warning) — flat on the floor at the arena center.
+3. Places the **arena marker** — the bundled A4 PDF printed at 100% / Actual size with a 180 mm black square — flat on the floor at the arena center. A screen-displayed substitute is not part of P0.
 4. Scans the marker with their own phone to verify it tracks, then sets the arena radius (3–6 m).
 5. Watches the lobby: joins, quiz completion, localization, locked positions on a live minimap.
 6. **Start Battle** when everyone is ready → synchronized countdown on all devices.
@@ -121,7 +121,7 @@ These decisions were made after researching the July 2026 AR landscape and the h
 
 ### 6.4 Health, elimination, match end
 - 100 HP per player; 0 HP → eliminated → P0 eliminated overlay (free spectator view is P1).
-- Battle ends when one player remains **or the timer expires (default 60 s, hard cap 90 s — see D4)**.
+- Battle ends when one player remains **or the fixed 60-second timer expires** (D4).
 - Timer expiry: highest remaining HP wins; ties break by quiz score.
 
 ### 6.5 Quiz reward economy
@@ -215,7 +215,7 @@ Each client establishes the shared arena origin by recognizing the floor marker.
 - App bundles the marker image and a printable PDF.
 - Client reports coarse localization state (`searching` / `localized` / `lost`) to the server. Pose freshness and quality remain local to the AR module.
 - Guided scan UX with retry; AR P0 battle start is blocked for unlocalized combat participants. P1 minimap participants use a separately defined readiness path.
-- Before countdown, loss clears readiness. After position lock during P0 battle, loss does not invalidate the locked server position. A fresh inertial pose may continue aiming; a stale or unavailable pose disables firing locally and shows a re-scan prompt.
+- Before countdown, loss clears readiness. After position lock during P0 battle, loss does not invalidate the locked server position. A degraded anchor may continue aiming only while its marker-relative pose remains fresh; marker removal, a stale pose, or unavailable world tracking disables firing locally and shows a re-scan prompt.
 
 ### FR-4: Lock position
 - Stored as marker-relative X/Z; rejected outside the arena, inside the marker safety zone, or violating minimum spacing. Rejections include a structured correction vector/distance for directional guidance; positions are unlockable before start and visible on the organizer minimap.
@@ -268,11 +268,11 @@ Each client establishes the shared arena origin by recognizing the floor marker.
 
 | Risk | Impact | Mitigation |
 |---|---|---|
-| Viro image-marker tracking is jittery/slow on real devices | Critical | **First technical gate** (see build spec): prove Android-to-iOS marker colocation before any feature work; generous hit cones; guided scan UX; re-scan affordance |
+| Viro image-marker tracking is jittery/slow on real devices | Critical | Keep M0 as a release gate: prove Android-to-iOS marker colocation before declaring the AR slice complete; use generous hit cones, guided scan UX, and re-scan affordance |
 | Per-device drift after marker scan misaligns aim | High | Stationary players, wide cones, aim assist, optional re-scan; battles too short for major drift |
 | iOS build, signing, or marker regression | Critical | Build and test an ARKit-compatible iPhone in M0; no Android-only completion path for P0 |
 | Device fragmentation (some phones can't AR) | High | P1 minimap fallback mode; ARCore/ARKit support check at join |
-| Thermal throttling mid-battle | Medium | 60–90 s battles, camera off outside AR phases, bounded bundled-GLB budgets |
+| Thermal throttling mid-battle | Medium | Fixed 60 s battles, camera off outside participant AR phases, bounded bundled-GLB budgets |
 | School WiFi jitter/congestion | Medium | Fixed positions + discrete attack events (not continuous sync); hotspot guidance |
 | ViroReact regression (small maintainer) | Medium | Pin versions; combat/net layer is Viro-independent; Unity port remains possible without touching the server |
 | Scope creep before the vertical slice works | High | Hard P0 gate; no P1 work until P0 runs on an Android phone and an iPhone |
@@ -298,7 +298,6 @@ Each client establishes the shared arena origin by recognizing the floor marker.
 ---
 
 ## 12. Open questions
-- Marker design: which image maximizes Viro tracking quality at 2–4 m? (Resolve in M0 with A/B of 2–3 candidates.)
-- Can a tablet-displayed marker substitute for print reliably, or is print required? (M0.)
+- Does the bundled 180 mm marker meet the M0 acquisition, alignment, heading, and drift thresholds on the designated Android/iPhone pair? Replace or resize it only if those measurements fail.
 - Exact loadout economy for P2 — design after observing real MVP sessions.
 - Hosting for Colyseus beyond the hackathon (a $5 VPS is fine for MVP; revisit at M3).

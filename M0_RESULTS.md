@@ -4,7 +4,7 @@
 
 **Test date:** 2026-07-16
 
-**Branch:** `codex/colyseus-mobile-integration`
+**Source commit:** `9721d51` (merged to `main` by `c5763d6`)
 
 **Marker:** `output/pdf/codexwars-arena-marker-a4.pdf`, printed at 100% / Actual size with a 180 mm black square
 
@@ -42,7 +42,7 @@ Fill this table using the same printed marker and the same commit on one ARCore-
 | Heading error | Not measured | Not measured | — |
 | Three-minute drift | Not measured | Not measured | — |
 | Stale-pose firing shutdown | Not measured | Not measured | — |
-| All enabled GLB variants render/animate | Not measured | Not measured | — |
+| All enabled GLB variants render; configured animations play | Not measured | Not measured | — |
 | Two complete mixed-platform rounds | Not measured | Not measured | — |
 
 M0 may be changed to **PASS** only after every required physical measurement passes on both platforms. A successful build, emulator run, or single-platform camera test is insufficient.

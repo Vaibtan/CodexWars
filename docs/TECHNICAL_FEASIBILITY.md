@@ -1,9 +1,9 @@
-# CodexWars P0 — Technical Feasibility and Recommended Stack
+# CodexWars P0 — Technical Feasibility Evidence
 
 **Assessed:** 2026-07-14  
 **Status:** Dated decision evidence; not an implementation source of truth
-**Inputs:** `PRD.md`, `BUILD_SPEC.md`, `ARCHITECTURE.md`, `API_AND_REALTIME_SPEC.md`, and `AR_IMPLEMENTATION_SPEC.md`
-**Verdict:** **Conditionally feasible for the hackathon vertical slice.** Android+iOS image-marker AR, native Expo development builds, and an authoritative LAN game server are all supported by the selected tools. The project must not be declared feasible until M0 measures real Android-to-iPhone marker alignment and tracking persistence. No official source can guarantee the PRD's 0.30 m / 90 s thresholds in the specific room, marker, lighting, and device mix.
+**Inputs:** `PRD.md`, `BUILD_SPEC.md`, `ARCHITECTURE.md`, `API_AND_REALTIME_SPEC.md`, and `docs/AR_IMPLEMENTATION_SPEC.md`
+**Verdict:** **Conditionally feasible for the hackathon vertical slice.** Android+iOS image-marker AR, native Expo development builds, and an authoritative LAN game server are supported by the selected tools. The spatial product claim must not be declared feasible until M0 measures real Android-to-iPhone marker alignment and tracking persistence. No official source can guarantee the 0.30 m agreement/drift thresholds over the required three-minute session in the specific room, marker, lighting, and device mix.
 
 The active stack and requirements are defined elsewhere; this file records only the external evidence behind the feasibility verdict.
 
@@ -11,7 +11,7 @@ The active stack and requirements are defined elsewhere; this file records only 
 
 ### 1. Android and iOS AR with Expo/Viro — feasible, with a device gate
 
-ReactVision's official Expo guide states that ViroReact does **not** run in Expo Go and requires a development client or prebuild plus a rebuild after adding the config plugin. It supports Android `AR` mode (ARCore) and iOS permission configuration. The checked-in scaffold is pinned to Expo SDK 54 / React Native 0.81 with `@reactvision/react-viro` 2.53.1; documentation compatibility is not a substitute for opening the same development-build commit on both target devices. [Viro Expo integration guide](https://viro-community.readme.io/docs/integrating-with-expo)
+ReactVision's official Expo guide states that ViroReact does **not** run in Expo Go and requires a development client or prebuild plus a rebuild after adding the config plugin. It supports Android `AR` mode (ARCore) and iOS permission configuration. The checked-in implementation is pinned to Expo SDK 54 / React Native 0.81 with `@reactvision/react-viro` 2.53.1; documentation compatibility and the successful Android development build are not substitutes for opening the same commit on both target devices. [Viro Expo integration guide](https://viro-community.readme.io/docs/integrating-with-expo)
 
 For Windows development, EAS performs builds on Expo servers and can create iOS builds from non-macOS hosts. A physical iPhone device build still requires paid Apple Developer signing; an iOS Simulator is macOS-only and cannot substitute for this AR test. [Expo development-build documentation](https://docs.expo.dev/develop/development-builds/create-a-build/)
 
@@ -29,7 +29,7 @@ The enforceable asset budgets and rendering constraints live only in `AR_IMPLEME
 
 ### 3. Authoritative multiplayer on a LAN — feasible
 
-Colyseus is built around server-defined room state synchronized to clients, and its default transport is WebSockets. Its default state patch rate is 50 ms (20 Hz), so the proposed 100 ms/10 Hz state rate is conservative for a 12-player room whose continuous aim data never leaves the device. [Colyseus server overview](https://docs.colyseus.io/server) · [Room API](https://docs.colyseus.io/room)
+Colyseus is built around server-defined room state synchronized to clients, and its default transport is WebSockets. Its default state patch rate is 50 ms (20 Hz); CodexWars explicitly configures 100 ms/10 Hz for a 12-player room whose continuous aim data never leaves the device. [Colyseus server overview](https://docs.colyseus.io/server) · [Room API](https://docs.colyseus.io/room)
 
 Colyseus exposes custom room IDs, matchmaking, synchronized room state, and reconnection lifecycle hooks required by the P0 contract. Exact behavior and grace periods live only in `API_AND_REALTIME_SPEC.md`. [Colyseus custom room ID recipe](https://docs.colyseus.io/recipes/custom-room-id) · [Colyseus reconnection guide](https://docs.colyseus.io/room/reconnection)
 
@@ -43,4 +43,4 @@ For a later hosted product, a single VPS/PaaS Node service needs TLS/WSS, WebSoc
 
 ## Feasibility boundary
 
-Proceed with the stack above **only after M0 passes on one real Android and one real iPhone**. If it passes or is only marginal, the P0 design (wide hit cones, stationary players, 60-second battle, local server) is practical. If cross-device marker alignment or tracking persistence misses the documented thresholds, AR P0 is not feasible as specified: stop and obtain an explicit revised-product decision rather than building the rest of the app around an unproven spatial layer.
+The code can be developed and build-tested behind the gate, but do not declare the shared spatial feature complete until M0 passes on one real Android and one real iPhone. If it passes or is only marginal, the P0 design (wide hit cones, stationary players, 60-second battle, local server) is practical. If cross-device marker alignment or tracking persistence misses the documented thresholds, AR P0 is not feasible as specified: stop and obtain an explicit revised-product decision before release.

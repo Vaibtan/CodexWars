@@ -1,5 +1,6 @@
 # CodexWars — AR and GLB Implementation Specification
 
+**Version:** 1.1
 **Status:** Authoritative AR/device and asset contract
 **Last updated:** 2026-07-16
 **Companions:** `PRD.md`, `BUILD_SPEC.md`, `ARCHITECTURE.md`, `API_AND_REALTIME_SPEC.md`
@@ -47,7 +48,7 @@ The implementation portion of M0 is complete. M0 itself remains open until the p
 Coarse state sent to the server is `searching | localized | lost`. High-frequency transforms remain on-device.
 
 - Before battle, losing localization clears readiness.
-- During battle, the server retains the locked position, while the mobile app disables firing without a fresh tracked/inertial aim.
+- During battle, the server retains the locked position. The mobile app permits firing from tracked or degraded/last-known marker tracking only while a new marker-relative pose remains fresh; marker removal, stale pose, or unavailable world tracking disables firing.
 - A cached direction older than 1 second must not be sent.
 - Project camera forward onto X/Z. If its magnitude is below `0.1`, disable fire and show “aim level.”
 - The client-predicted target may drive highlighting only. The server ignores it for authority.

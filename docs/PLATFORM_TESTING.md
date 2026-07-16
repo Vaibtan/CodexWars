@@ -2,7 +2,7 @@
 
 CodexWars is one Expo/React Native application in `apps/mobile`. Platform
 differences are isolated to Expo configuration and native development builds;
-game screens, protocol types, and future AR presentation code remain shared.
+game screens, protocol types, and AR presentation code remain shared.
 
 ## Shared platform contract
 
@@ -46,7 +46,7 @@ one ARCore-capable Android phone:
 
 - app starts and connects to Metro/backend on the selected LAN;
 - marker acquisition and tracking-loss recovery work;
-- GLB asset loads and animation plays;
+- every enabled GLB asset loads and renders; any configured animation plays;
 - marker-relative position and aim produce matching server results;
 - no platform-specific UI/permission or performance regression appears.
 

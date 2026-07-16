@@ -34,6 +34,10 @@ The hackathon demo targets 3–4 physical devices, while the room model supports
 5. The organizer starts a synchronized 60-second AR battle.
 6. Players see the final standings and can begin another learning round.
 
+## Delivery status
+
+The authoritative Colyseus backend, mobile realtime adapter, shared marker-space conversion, retained Viro scene, bundled character catalog, Android bundle, and ARM64 development APK build are implemented. Physical Android/iPhone M0 measurements and the complete mixed-platform M1 rehearsal are still open; see [`M0_RESULTS.md`](M0_RESULTS.md). A successful build does not prove shared physical alignment.
+
 ## Team
 
 - Shubhendu
@@ -55,8 +59,6 @@ We began by turning the idea into Markdown documents and prompts, including the 
 - GLB character assets
 - Colyseus 0.17 for the authoritative in-memory War Room and session authentication
 
-## Project structure
-
 ## Specification map
 
 Each decision has one authoritative home:
@@ -68,13 +70,12 @@ Each decision has one authoritative home:
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Component boundaries, runtime flows, state ownership, and invariants |
 | [`API_AND_REALTIME_SPEC.md`](API_AND_REALTIME_SPEC.md) | Exact P0 admission, synchronized state, commands, events, errors, and reconnect contract |
 | [`docs/AR_IMPLEMENTATION_SPEC.md`](docs/AR_IMPLEMENTATION_SPEC.md) | Marker/pose adapter and GLB rendering/asset contract |
+| [`CONTEXT.md`](CONTEXT.md) | Canonical domain terms used by the specifications and code |
 | [`M0_RESULTS.md`](M0_RESULTS.md) | Physical marker-colocation acceptance results and remaining measurements |
 
-Supporting research and testing guides are evidence or procedure, not competing
-sources of truth. The material under `docs/archive/` is historical only.
+Supporting evidence and procedures live in [`docs/TECHNICAL_FEASIBILITY.md`](docs/TECHNICAL_FEASIBILITY.md), [`docs/PLATFORM_TESTING.md`](docs/PLATFORM_TESTING.md), and [`docs/adr/`](docs/adr/). They do not override the specifications above.
 
-Backend implementation work is sequenced in the
-[`P0 backend checklist`](docs/BACKEND_IMPLEMENTATION_CHECKLIST.md).
+## Project structure
 
 ```text
 apps/
