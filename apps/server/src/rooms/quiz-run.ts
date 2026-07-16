@@ -155,7 +155,6 @@ export class QuizRun {
       const selectedOptionId = participant.answers.get(question.id);
       const correct = selectedOptionId === question.answerOptionId;
       if (correct) participant.runningCorrectAnswers += 1;
-      player.correctAnswers = participant.runningCorrectAnswers;
       this.publisher.participantEvent(playerId, "quiz_answer_result", {
         correct,
         questionId: question.id,

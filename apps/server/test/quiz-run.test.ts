@@ -25,7 +25,7 @@ function fixture(): { readonly events: PublishedEvent[]; readonly player: Player
 }
 
 describe("Quiz Run", () => {
-  it("owns cohort, submission, reveal, and running score progression", () => {
+  it("keeps a participant's running score private during question reveals", () => {
     const { events, player, quizRun, state } = fixture();
     const now = 1_000;
 
@@ -41,7 +41,7 @@ describe("Quiz Run", () => {
 
     quizRun.advance(state.quiz.questionEndsAt);
 
-    expect(player.correctAnswers).toBe(1);
+    expect(player.correctAnswers).toBe(0);
     expect(events).toEqual(expect.arrayContaining([
       expect.objectContaining({ audience: "room", type: "quiz_question_started" }),
       expect.objectContaining({ audience: "participant", type: "quiz_answer_accepted" }),
@@ -63,5 +63,35 @@ describe("Quiz Run", () => {
     quizRun.reset();
 
     expect(state.quiz).toMatchObject({ questionIndex: -1, status: "ready", submittedCount: 0 });
+  });
+
+  it("publishes the finalized score and shield only when the Quiz Run completes", () => {
+    const { events, player, quizRun, state } = fixture();
+    let now = 1_000;
+    expect(quizRun.start(now)).toBe(true);
+
+    for (const [index, question] of PROGRAMMING_FUNDAMENTALS_V1.questions.entries()) {
+      expect(quizRun.submit(player.playerId, {
+        command: "quiz_answer",
+        commandId: `answer-${index}`,
+        optionId: question.answerOptionId,
+        questionId: question.id,
+        roundId: state.roundId
+      }, now + 1)).toEqual({ ok: true });
+      now = state.quiz.questionEndsAt;
+      quizRun.advance(now);
+      expect(player.correctAnswers).toBe(0);
+      now = state.quiz.revealEndsAt;
+      quizRun.advance(now);
+    }
+
+    expect(state.phase).toBe("localization");
+    expect(player).toMatchObject({ correctAnswers: 10, quizCompleted: true, shield: 40 });
+    expect(events.filter((event) => event.type === "quiz_completed")).toEqual([
+      expect.objectContaining({
+        audience: "participant",
+        payload: expect.objectContaining({ correctAnswers: 10, startingShield: 40 })
+      })
+    ]);
   });
 });

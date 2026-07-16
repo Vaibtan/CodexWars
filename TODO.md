@@ -1,8 +1,8 @@
 # CodexWars Backend TODO
 
-**Status:** Active
+**Status:** Complete
 **Last reviewed:** 2026-07-16
-**Scope:** Remaining work required to make the P0 backend implementation complete and release-ready.
+**Scope:** Completion record for the P0 backend correctness, coverage, and release-readiness work.
 
 This file is an implementation tracker, not a product or protocol specification. Product behavior and wire contracts remain authoritative in:
 
@@ -24,7 +24,7 @@ The backend already implements the main P0 loop:
 - State privacy controls, payload limits, rate limits, and command deduplication
 - Health and readiness endpoints
 
-The last verified baseline passed 29 server tests, 11 shared-package tests, 14 mobile unit tests, 9 mobile native-identity tests, and strict TypeScript checks for every workspace. The items below close the remaining correctness, coverage, and readiness gaps.
+The completed P0 gate passes 62 server tests, 19 shared-package tests, 15 mobile unit tests, 9 mobile native-identity tests, and strict TypeScript checks for every workspace. The checklist below records the implemented and verified closure of the original correctness, coverage, and readiness gaps.
 
 ## Execution order
 
@@ -42,22 +42,22 @@ The lifecycle must be phase-aware so a disconnected participant cannot deadlock 
 
 ### Required behavior
 
-- [ ] In the lobby, an explicit participant leave removes the participant record.
-- [ ] During quiz, localization, or positioning, an explicit leave retains the round record, marks the participant disconnected, clears readiness and position, and sets `combatIncluded` to `false`.
-- [ ] During quiz, localization, or positioning, an unexpected disconnect retains the participant for the 20-second reconnect grace period.
-- [ ] When that pre-countdown grace period expires, automatically exclude the participant from combat and clear readiness and position.
-- [ ] During countdown or battle, retain the existing 20-second reconnect grace period for an unexpected disconnect.
-- [ ] When an active-round reconnect grace period expires, eliminate the participant exactly once and re-evaluate whether the round has a winner.
-- [ ] During countdown or battle, an explicit leave immediately eliminates the participant exactly once, re-evaluates round completion, and retains the record for standings.
-- [ ] Preserve the organizer policies: 60-second grace before countdown, 20-second grace during countdown or battle, and no organizer role transfer.
+- [x] In the lobby, an explicit participant leave removes the participant record.
+- [x] During quiz, localization, or positioning, an explicit leave retains the round record, marks the participant disconnected, clears readiness and position, and sets `combatIncluded` to `false`.
+- [x] During quiz, localization, or positioning, an unexpected disconnect retains the participant for the 20-second reconnect grace period.
+- [x] When that pre-countdown grace period expires, automatically exclude the participant from combat and clear readiness and position.
+- [x] During countdown or battle, retain the existing 20-second reconnect grace period for an unexpected disconnect.
+- [x] When an active-round reconnect grace period expires, eliminate the participant exactly once and re-evaluate whether the round has a winner.
+- [x] During countdown or battle, an explicit leave immediately eliminates the participant exactly once, re-evaluates round completion, and retains the record for standings.
+- [x] Preserve the organizer policies: 60-second grace before countdown, 20-second grace during countdown or battle, and no organizer role transfer.
 
 ### Acceptance criteria
 
-- [ ] No disconnect or leave path can deadlock phase progression.
-- [ ] Each active-round departure produces at most one elimination and one corresponding event.
-- [ ] Reconnecting within the grace period restores the same authoritative participant record.
-- [ ] Final standings remain stable after disconnects and explicit leaves.
-- [ ] An explicit lobby leave does not leave a ghost participant.
+- [x] No disconnect or leave path can deadlock phase progression.
+- [x] Each active-round departure produces at most one elimination and one corresponding event.
+- [x] Reconnecting within the grace period restores the same authoritative participant record.
+- [x] Final standings remain stable after disconnects and explicit leaves.
+- [x] An explicit lobby leave does not leave a ghost participant.
 
 ## P0-2: Publish quiz scores only after quiz completion
 
@@ -65,18 +65,18 @@ The lifecycle must be phase-aware so a disconnected participant cannot deadlock 
 
 ### Required behavior
 
-- [ ] Maintain the running correct-answer count in private server state.
-- [ ] Continue returning the participant's private running result through `quiz_answer_result` where required by the API contract.
-- [ ] Keep public `PlayerState.correctAnswers` at its initial or last finalized value during questions and reveals.
-- [ ] Publish the final correct-answer count and shield reward together when the complete quiz finishes.
-- [ ] Clear both private running state and public finalized state during round reset.
+- [x] Maintain the running correct-answer count in private server state.
+- [x] Continue returning the participant's private running result through `quiz_answer_result` where required by the API contract.
+- [x] Keep public `PlayerState.correctAnswers` at its initial or last finalized value during questions and reveals.
+- [x] Publish the final correct-answer count and shield reward together when the complete quiz finishes.
+- [x] Clear both private running state and public finalized state during round reset.
 
 ### Acceptance criteria
 
-- [ ] Public room state never exposes partial scores during question or reveal phases.
-- [ ] Each participant receives the correct private answer result and running total.
-- [ ] Quiz completion publishes the correct final score and shield reward.
-- [ ] Reconnects do not expose selected answers or another participant's partial score.
+- [x] Public room state never exposes partial scores during question or reveal phases.
+- [x] Each participant receives the correct private answer result and running total.
+- [x] Quiz completion publishes the correct final score and shield reward.
+- [x] Reconnects do not expose selected answers or another participant's partial score.
 
 ## P0-3: Normalize matchmaking errors
 
@@ -101,25 +101,25 @@ Add deterministic unit coverage for `packages/shared/src/combat.ts` and related 
 
 ### Position validation
 
-- [ ] Reject non-finite coordinates.
-- [ ] Accept the exact 0.75 m marker-exclusion boundary and reject positions inside it.
-- [ ] Accept the exact arena-radius boundary and reject positions outside it.
-- [ ] Accept the exact 1.5 m player-spacing boundary and reject positions below it.
-- [ ] Verify correction data is finite and includes a valid direction, magnitude, and conflicting participant ID.
+- [x] Reject non-finite coordinates.
+- [x] Accept the exact 0.75 m marker-exclusion boundary and reject positions inside it.
+- [x] Accept the exact arena-radius boundary and reject positions outside it.
+- [x] Accept the exact 1.5 m player-spacing boundary and reject positions below it.
+- [x] Verify correction data is finite and includes a valid direction, magnitude, and conflicting participant ID.
 
 ### Combat helpers
 
-- [ ] Test `normalizeDirection` at the valid magnitude boundaries of 0.1 and 2.0 and outside them.
-- [ ] Verify `resolveBoltAttack` ignores targets behind the attacker, outside range, or ineligible.
-- [ ] Verify the nearest aligned target wins and equal-distance ties use stable participant-ID ordering.
-- [ ] Verify a valid attack can miss without mutating combat state.
-- [ ] Verify `applyDamage` consumes shield before HP, handles overflow, clamps values, and eliminates at exactly zero HP.
-- [ ] Verify `standingsFor` orders by HP, then quiz score, then stable participant ID.
+- [x] Test `normalizeDirection` at the valid magnitude boundaries of 0.1 and 2.0 and outside them.
+- [x] Verify `resolveBoltAttack` ignores targets behind the attacker, outside range, or ineligible.
+- [x] Verify the nearest aligned target wins and equal-distance ties use stable participant-ID ordering.
+- [x] Verify a valid attack can miss without mutating combat state.
+- [x] Verify `applyDamage` consumes shield before HP, handles overflow, clamps values, and eliminates at exactly zero HP.
+- [x] Verify `standingsFor` orders by HP, then quiz score, then stable participant ID.
 
 ### Acceptance criteria
 
-- [ ] The suite is deterministic and requires no device, wall-clock timing, or network access.
-- [ ] Boundary behavior is asserted explicitly rather than covered only by broad happy-path cases.
+- [x] The suite is deterministic and requires no device, wall-clock timing, or network access.
+- [x] Boundary behavior is asserted explicitly rather than covered only by broad happy-path cases.
 
 ## P0-5: WarRoom negative-path integration tests
 
@@ -127,52 +127,52 @@ Add direct assertions for the documented validation and error contract. Avoid du
 
 ### Admission and identity
 
-- [ ] Invalid or unsupported client protocol version.
-- [ ] Nickname normalization, control-character rejection, and length limits.
-- [ ] Thirteenth participant rejection and full-room behavior.
-- [ ] Room not found and room not joinable.
-- [ ] Deterministic duplicate-nickname suffixes.
+- [x] Invalid or unsupported client protocol version.
+- [x] Nickname normalization, control-character rejection, and length limits.
+- [x] Thirteenth participant rejection and full-room behavior.
+- [x] Room not found and room not joinable.
+- [x] Deterministic duplicate-nickname suffixes.
 
 ### Command validation
 
-- [ ] Payload-size, round-ID, role, command-deduplication, per-round-cap, and rate-limit failures.
-- [ ] Stable structured error codes and details for each failure.
+- [x] Payload-size, round-ID, role, command-deduplication, per-round-cap, and rate-limit failures.
+- [x] Stable structured error codes and details for each failure.
 
 ### Quiz
 
-- [ ] Exact answer-deadline boundary.
-- [ ] Invalid question ID and option ID.
-- [ ] Semantic duplicate answer handling.
-- [ ] Missing and disconnected-participant answers.
-- [ ] Private answer results and public-state privacy.
+- [x] Exact answer-deadline boundary.
+- [x] Invalid question ID and option ID.
+- [x] Semantic duplicate answer handling.
+- [x] Missing and disconnected-participant answers.
+- [x] Private answer results and public-state privacy.
 
 ### Localization and positioning
 
-- [ ] Arena-radius, marker-exclusion, out-of-bounds, and minimum-spacing boundaries.
-- [ ] Structured correction details for rejected positions.
-- [ ] Position unlock and relock behavior.
-- [ ] All battle-start blockers returned together.
-- [ ] Quiz-only participants excluded from combat readiness blockers.
+- [x] Arena-radius, marker-exclusion, out-of-bounds, and minimum-spacing boundaries.
+- [x] Structured correction details for rejected positions.
+- [x] Position unlock and relock behavior.
+- [x] All battle-start blockers returned together.
+- [x] Quiz-only participants excluded from combat readiness blockers.
 
 ### Combat and reset
 
-- [ ] Attacks before battle start and after battle end.
-- [ ] Cooldown, invalid direction, invalid weapon, eliminated-attacker, and lost-localization failures.
-- [ ] Valid misses and duplicate command IDs.
-- [ ] Complete reset of round-scoped fields.
-- [ ] Rejection of commands carrying an old round ID.
-- [ ] Stable event sequence and round ordering.
+- [x] Attacks before battle start and after battle end.
+- [x] Cooldown, invalid direction, invalid weapon, eliminated-attacker, and lost-localization failures.
+- [x] Valid misses and duplicate command IDs.
+- [x] Complete reset of round-scoped fields.
+- [x] Rejection of commands carrying an old round ID.
+- [x] Stable event sequence and round ordering.
 
 ## P0-6: Disconnect and expiry integration tests
 
-- [ ] Participant reconnect within the 20-second grace period restores the same session.
-- [ ] Pre-countdown timeout automatically excludes the participant from combat after P0-1 is implemented.
-- [ ] Battle timeout eliminates the participant exactly once.
-- [ ] Explicit participant leave follows the documented policy in every phase.
-- [ ] Organizer timeout after 60 seconds before countdown closes the room.
-- [ ] Organizer absence during the 20-second active-round grace period does not stop the match.
-- [ ] Idle room expiry occurs after two hours.
-- [ ] Server restart invalidates prior reconnect tokens.
+- [x] Participant reconnect within the 20-second grace period restores the same session.
+- [x] Pre-countdown timeout automatically excludes the participant from combat after P0-1 is implemented.
+- [x] Battle timeout eliminates the participant exactly once.
+- [x] Explicit participant leave follows the documented policy in every phase.
+- [x] Organizer timeout after 60 seconds before countdown closes the room.
+- [x] Organizer absence during the 20-second active-round grace period does not stop the match.
+- [x] Idle room expiry occurs after two hours.
+- [x] Server restart invalidates prior reconnect tokens.
 
 ## P0-7: Twelve-combatant backend rehearsal
 
@@ -180,19 +180,19 @@ The existing twelve-participant admission test excludes most participants from c
 
 ### Required behavior
 
-- [ ] Arrange twelve valid locked positions inside the 6 m arena while respecting marker exclusion and minimum spacing.
-- [ ] Localize and ready all twelve combatants.
-- [ ] Start the battle with all twelve included.
-- [ ] Exercise the documented maximum raw attack rate while room patches run at 100 ms/10 Hz.
-- [ ] Verify state validity, damage deduplication, event ordering, and completion without command timeouts.
-- [ ] Run the deterministic rehearsal twice.
+- [x] Arrange twelve valid locked positions inside the 6 m arena while respecting marker exclusion and minimum spacing.
+- [x] Localize and ready all twelve combatants.
+- [x] Start the battle with all twelve included.
+- [x] Exercise the documented maximum raw attack rate while room patches run at 100 ms/10 Hz.
+- [x] Verify state validity, damage deduplication, event ordering, and completion without command timeouts.
+- [x] Run the deterministic rehearsal twice.
 
 ### Acceptance criteria
 
-- [ ] Define a measurable pass threshold before treating the rehearsal as complete.
-- [ ] Prefer fake-clock and bounded event-count assertions for CI; do not make CI depend on a flaky wall-clock-only threshold.
-- [ ] Record any manual local performance measurement separately from deterministic correctness assertions.
-- [ ] Treat the mixed-device physical rehearsal as a separate M1 integration gate, not as a substitute for this backend test.
+- [x] The automated pass threshold is 12 accepted simultaneous attacks, 108 cooldown rejections, a 12-event ordered attack sequence, exact 34-event round completion, and identical results across two runs.
+- [x] The rehearsal uses a fake clock and bounded event-count assertions; CI has no wall-clock performance threshold.
+- [x] No manual performance result is represented as deterministic CI evidence.
+- [x] The mixed-device physical rehearsal remains a separate M1 integration gate, not a substitute for this backend test.
 
 ## P0-8: Remove the obsolete HTTP server duplicate
 
@@ -204,16 +204,16 @@ The existing twelve-participant admission test excludes most participants from c
 
 ## P0 definition of done
 
-- [ ] P0-1 through P0-8 are complete.
-- [ ] `npm run typecheck --workspace @codexwars/shared` passes.
-- [ ] `npm run test --workspace @codexwars/shared` passes.
-- [ ] `npm run typecheck --workspace @codexwars/server` passes.
-- [ ] `npm run test --workspace @codexwars/server` passes.
-- [ ] Root `npm run typecheck` passes.
-- [ ] Root `npm test` passes.
-- [ ] The twelve-combatant backend rehearsal passes twice deterministically.
-- [ ] P0 introduces no Firebase, database, account, or cloud-service dependency.
-- [ ] Device M0/M1 validation is tracked as an external integration gate after backend completion.
+- [x] P0-1 through P0-8 are complete.
+- [x] `npm run typecheck --workspace @codexwars/shared` passes.
+- [x] `npm run test --workspace @codexwars/shared` passes.
+- [x] `npm run typecheck --workspace @codexwars/server` passes.
+- [x] `npm run test --workspace @codexwars/server` passes.
+- [x] Root `npm run typecheck` passes.
+- [x] Root `npm test` passes.
+- [x] The twelve-combatant backend rehearsal passes twice deterministically.
+- [x] P0 introduces no Firebase, database, account, or cloud-service dependency.
+- [x] Device M0/M1 validation is tracked as an external integration gate after backend completion.
 
 ## Deferred beyond P0
 

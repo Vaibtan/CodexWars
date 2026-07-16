@@ -31,11 +31,11 @@ describe("War Room membership", () => {
 
     expect(membership.drop("participant-session", 1_500)).toBe(participant);
     expect(player).toMatchObject({ connected: false, disconnectedAt: 1_500, ready: false });
-    expect(membership.removeConnectedParticipant("participant-session")).toBeUndefined();
+    expect(membership.leaveConnectedParticipant("participant-session", 1_501)).toBeUndefined();
 
     expect(membership.reconnect("participant-session")).toBe(participant);
     expect(player).toMatchObject({ connected: true, disconnectedAt: 0 });
-    expect(membership.removeConnectedParticipant("participant-session")).toBe(participant);
+    expect(membership.leaveConnectedParticipant("participant-session", 1_502)).toEqual({ disposition: "removed", participant });
     expect(state.players.size).toBe(0);
   });
 
@@ -48,12 +48,68 @@ describe("War Room membership", () => {
 
     expect(membership.organizerReconnectPolicy()).toEqual({ closeRoomOnExpiry: true, graceMs: 60_000 });
     membership.drop("participant-session", 1_000);
-    expect(membership.participantReconnectExpired("player-1")).toBe(false);
 
     state.phase = "battle";
     expect(membership.organizerReconnectPolicy()).toEqual({ closeRoomOnExpiry: false, graceMs: 20_000 });
-    expect(membership.participantReconnectExpired("player-1")).toBe(true);
+    expect(membership.participantReconnectExpired("player-1")).toBe("eliminated");
     expect(state.players.get("player-1")).toMatchObject({ eliminated: true, hp: 0 });
-    expect(membership.participantReconnectExpired("player-1")).toBe(false);
+    expect(membership.participantReconnectExpired("player-1")).toBeUndefined();
+  });
+
+  it("excludes rather than eliminates a participant when pre-battle reconnect grace expires", () => {
+    const state = new WarRoomState();
+    const membership = new WarRoomMembership(state);
+    membership.join("organizer-session", "Teacher");
+    membership.join("participant-session", "Ada");
+    const player = state.players.get("player-1")!;
+    state.phase = "positioning";
+    player.localization = "localized";
+    player.positionLocked = true;
+    player.positionX = 2;
+    player.positionZ = 1;
+    player.ready = true;
+
+    membership.drop("participant-session", 1_000);
+    membership.participantReconnectExpired("player-1");
+
+    expect(player).toMatchObject({
+      combatIncluded: false,
+      connected: false,
+      eliminated: false,
+      hp: 100,
+      positionLocked: false,
+      positionX: 0,
+      positionZ: 0,
+      ready: false
+    });
+  });
+
+  it.each(["quiz", "localization", "positioning"] as const)("retains and excludes an explicit participant leave during %s", (phase) => {
+    const state = new WarRoomState();
+    const membership = new WarRoomMembership(state);
+    membership.join("organizer-session", "Teacher");
+    const participant = membership.join("participant-session", "Ada");
+    expect(participant.kind).toBe("participant");
+    const player = state.players.get("player-1")!;
+    state.phase = phase;
+    player.positionLocked = true;
+    player.positionX = 2;
+    player.ready = true;
+
+    expect(membership.leaveConnectedParticipant("participant-session", 2_000)).toEqual({ disposition: "retained", participant });
+    expect(player).toMatchObject({ combatIncluded: false, connected: false, positionLocked: false, positionX: 0, ready: false });
+  });
+
+  it.each(["countdown", "battle"] as const)("retains and eliminates an explicit participant leave during %s", (phase) => {
+    const state = new WarRoomState();
+    const membership = new WarRoomMembership(state);
+    membership.join("organizer-session", "Teacher");
+    const participant = membership.join("participant-session", "Ada");
+    expect(participant.kind).toBe("participant");
+    state.phase = phase;
+
+    expect(membership.leaveConnectedParticipant("participant-session", 2_000)).toEqual({ disposition: "eliminated", participant });
+    expect(state.players.get("player-1")).toMatchObject({ combatIncluded: true, connected: false, eliminated: true, hp: 0 });
+    expect(membership.leaveConnectedParticipant("participant-session", 2_001)).toBeUndefined();
   });
 });

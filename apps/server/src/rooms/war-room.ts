@@ -51,6 +51,7 @@ export interface WarRoomDependencies {
   readonly createRoomIdAllocator: (presence: PresenceSet) => RoomIdAllocator;
   readonly log: (entry: RedactedLogEntry) => void;
   readonly now: () => number;
+  readonly reconnectGraceMs: (configuredGraceMs: number) => number;
 }
 
 export interface RedactedLogEntry {
@@ -64,7 +65,8 @@ export interface RedactedLogEntry {
 const productionDependencies: WarRoomDependencies = {
   createRoomIdAllocator: (presence) => new RoomIdAllocator(presence),
   log: (entry) => console.info(JSON.stringify(entry)),
-  now: () => Date.now()
+  now: () => Date.now(),
+  reconnectGraceMs: (configuredGraceMs) => configuredGraceMs
 };
 
 let dependencies: WarRoomDependencies = productionDependencies;
@@ -156,13 +158,17 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
   }
 
   onLeave(client: Client): void {
-    const member = this.membership.memberForSession(client.sessionId);
-    if (member?.kind === "organizer" && !this.state.organizer.connected) {
+    if (this.membership.leaveConnectedOrganizer(client.sessionId)) {
       this.disconnect();
       return;
     }
-    const removed = this.membership.removeConnectedParticipant(client.sessionId);
-    if (removed !== undefined) this.quizRun.removeParticipant(removed.playerId);
+    const departure = this.membership.leaveConnectedParticipant(client.sessionId, this.now());
+    if (departure?.disposition === "removed") this.quizRun.removeParticipant(departure.participant.playerId);
+    if (departure?.disposition === "retained") this.transitionToPositioningWhenLocalized();
+    if (departure?.disposition === "eliminated") {
+      this.emitEvent("player_eliminated", { eliminatedByPlayerId: null, playerId: departure.participant.playerId });
+      this.completeIfLastAlive();
+    }
   }
 
   async onDispose(): Promise<void> {
@@ -400,7 +406,6 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
   private attack(client: Client, actor: ParticipantMember, command: Extract<ValidatedCommand, { command: "attack" }>, now: number): boolean {
     const attacker = this.state.players.get(actor.playerId);
     if (!this.canAttack(attacker, now)) return this.reject(client, "ATTACK_NOT_ALLOWED", command.commandId);
-    if (command.weaponId !== "bolt") return this.reject(client, "WEAPON_INVALID", command.commandId);
     const direction = normalizeDirection(command.dirX, command.dirZ);
     if (!direction.ok) return this.reject(client, "ATTACK_DIRECTION_INVALID", command.commandId);
     if (now < attacker.nextAttackAt) return this.reject(client, "ATTACK_COOLDOWN", command.commandId);
@@ -461,8 +466,11 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
     this.quizRun.reset();
     this.state.battle = new BattleState();
     this.membership.clearCommandOutcomes();
+    this.membership.removeDisconnectedParticipants();
     for (const player of this.state.players.values()) {
       this.clearPreBattleState(player);
+      player.characterColorId = "gold";
+      player.characterId = "default";
       player.combatIncluded = true;
       player.quizCompleted = false;
       player.correctAnswers = 0;
@@ -474,6 +482,7 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
     const now = this.now();
     this.state.serverNow = now;
     this.quizRun.advance(now);
+    this.transitionToPositioningWhenLocalized();
     if (this.state.phase === "countdown" && now >= this.state.battle.startsAt) {
       this.state.phase = "battle";
       this.state.battle.status = "active";
@@ -540,17 +549,20 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
   }
 
   private allowParticipantReconnection(client: Client, playerId: PlayerId): void {
-    this.allowReconnection(client, BATTLE.DISCONNECT_ELIMINATION_MS / 1_000)
+    this.allowReconnection(client, dependencies.reconnectGraceMs(BATTLE.DISCONNECT_ELIMINATION_MS) / 1_000)
       .catch(() => {
-        if (!this.membership.participantReconnectExpired(playerId)) return;
-        this.emitEvent("player_eliminated", { eliminatedByPlayerId: null, playerId });
-        this.completeIfLastAlive();
+        const disposition = this.membership.participantReconnectExpired(playerId);
+        if (disposition === "excluded") this.transitionToPositioningWhenLocalized();
+        if (disposition === "eliminated") {
+          this.emitEvent("player_eliminated", { eliminatedByPlayerId: null, playerId });
+          this.completeIfLastAlive();
+        }
       });
   }
 
   private allowOrganizerReconnection(client: Client): void {
     const policy = this.membership.organizerReconnectPolicy();
-    const reconnection = this.allowReconnection(client, policy.graceMs / 1_000);
+    const reconnection = this.allowReconnection(client, dependencies.reconnectGraceMs(policy.graceMs) / 1_000);
     if (policy.closeRoomOnExpiry) reconnection.catch(() => this.disconnect());
     else reconnection.catch(() => undefined);
   }
@@ -575,6 +587,7 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
   }
 
   private clearPreBattleState(player: PlayerState): void {
+    player.hasAnsweredCurrent = false;
     player.localization = "not_started";
     player.positionLocked = false;
     player.positionX = 0;

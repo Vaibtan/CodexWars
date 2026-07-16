@@ -431,7 +431,7 @@ type ResetRound = CommandMeta;
 - Allowed only in `results`.
 - Retains connected room members, display names, and server-bound roles.
 - Increments `roundId`.
-- Clears quiz answers/scores/rewards, localization, positions, readiness, combat state, command-deduplication state, and per-round `eventSequence`.
+- Removes disconnected participants, resets connected participants to the default character and gold palette, and clears quiz answers/scores/rewards, localization, positions, readiness, combat state, command-deduplication state, and per-round `eventSequence`.
 - Returns to `lobby`; no previous-round data remains available after reset.
 
 ### 6.2 Participant commands
@@ -679,15 +679,16 @@ Do not log or include reconnection tokens in analytics, errors, or synchronized 
 
 ### 8.2 Participant disconnect policy
 
-- Before battle: retain the participant record and mark `connected=false`; readiness becomes false. The organizer can continue once they return or exclude them from combat.
-- During countdown/battle: retain position, HP, shield, and cooldown for 20 seconds.
-- Reconnect within 20 seconds: reattach unchanged state.
-- Grace expiry during battle: eliminate exactly once and broadcast the authoritative result.
+- An explicit leave from `lobby` or `results` removes the participant record. An explicit leave during quiz, localization, or positioning retains the round record but immediately excludes it from combat and clears readiness and position.
+- An unexpected disconnect during quiz, localization, or positioning retains the participant for a 20-second reconnection grace. Reconnection reattaches the same record; expiry automatically excludes it from combat and clears readiness and position so phase progression cannot deadlock.
+- During countdown or battle, an unexpected disconnect retains position, HP, shield, and cooldown for 20 seconds. Reconnection reattaches unchanged state; expiry eliminates exactly once and re-evaluates round completion.
+- An explicit leave during countdown or battle eliminates immediately, broadcasts the authoritative elimination once, and retains the record for standings.
 
 ### 8.3 Organizer disconnect policy
 
 - Before countdown: keep the phase unchanged and disable organizer-only commands for 60 seconds. Grace expiry closes the in-memory room.
 - During countdown/battle: timers and combat continue; the organizer may reconnect to the same role for 20 seconds. Token expiry does not pause or close the active match, and organizer controls remain unavailable for the rest of that round.
+- An explicit organizer leave closes the room immediately; it is never treated as a recoverable transport drop.
 - The organizer role never transfers automatically to a participant in P0.
 
 ### 8.4 Room expiry and restart
@@ -698,7 +699,7 @@ Rooms expire after two hours without a successful join, reconnect, or accepted i
 
 ## 9. Error catalogue
 
-Matchmaking rejections originate from Colyseus lifecycle errors, while in-room failures use the structured `server_error` payload above. The current mobile adapter validates four-digit syntax locally but otherwise surfaces the SDK matchmaking error directly; normalizing those errors into `WarRoomCommandError` is still required before the M1 rehearsal.
+Matchmaking rejections originate from Colyseus lifecycle errors, while in-room failures use the structured `server_error` payload above. The mobile adapter validates four-digit syntax locally and normalizes create, join, and reconnect failures into stable `WarRoomCommandError` codes and retryability; raw SDK messages and stack traces are not player-facing.
 
 | Code | Surface | Meaning | Retryable |
 |---|---|---|---|
@@ -803,7 +804,7 @@ Room-code enumeration resistance becomes important for an internet-hosted produc
 
 ### 11.5 Reconnection and load
 
-- Participant reconnect within 20 seconds restores state; timeout eliminates once.
+- Participant reconnect within 20 seconds restores the same state; pre-countdown timeout excludes the participant from combat, while countdown/battle timeout eliminates exactly once.
 - Organizer reconnect within the pre-battle 60-second grace restores controls; timeout closes the room. During countdown/battle the reconnect window is 20 seconds and expiry does not interrupt the match.
 - Server restart produces explicit session-ended UX rather than infinite reconnect.
 - Missed/duplicate events recover from Schema state and ordering fields.

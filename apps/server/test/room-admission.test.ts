@@ -100,6 +100,61 @@ describe("War Room admission", () => {
     expect(harness.room.state.players.size).toBe(0);
   });
 
+  it("retains and excludes a participant who explicitly leaves during the Quiz Run", async () => {
+    const harness = await WarRoomHarness.create(colyseus);
+    const participant = await harness.joinParticipant("Ada");
+    const playerId = [...harness.room.state.players.keys()][0]!;
+    await harness.sendAndPatch(harness.organizer, "start_quiz", harness.command());
+
+    await participant.leave();
+    await harness.waitForPatch();
+
+    expect(harness.room.state.players.get(playerId)).toMatchObject({
+      combatIncluded: false,
+      connected: false,
+      positionLocked: false,
+      ready: false
+    });
+  });
+
+  it("eliminates once and retains stable standings across explicit battle and results leaves", async () => {
+    let now = 1_000_000;
+    const restoreDependencies = setWarRoomDependenciesForTest({ log: () => undefined, now: () => now });
+    try {
+      const harness = await WarRoomHarness.create(colyseus);
+      const first = await harness.joinParticipant("Ada");
+      const second = await harness.joinParticipant("Grace");
+      const { organizer, room } = harness;
+      await harness.advanceToBattle([first, second], [{ x: 1, z: 0 }, { x: -1, z: 0 }], (value) => { now = value; });
+      expect(room.state.phase).toBe("battle");
+
+      const departingPlayerId = [...room.state.players.keys()][1]!;
+      const eventsBeforeLeave = room.state.eventSequence;
+      const eliminatedEvents: unknown[] = [];
+      const completedEvents: unknown[] = [];
+      organizer.onMessage("player_eliminated", (event) => eliminatedEvents.push(event));
+      organizer.onMessage("battle_completed", (event) => completedEvents.push(event));
+      await second.leave();
+      await harness.waitForPatch();
+
+      expect(eliminatedEvents).toEqual([expect.objectContaining({ eliminatedByPlayerId: null, playerId: departingPlayerId })]);
+      expect(completedEvents).toEqual([expect.objectContaining({ reason: "last_alive" })]);
+      expect(room.state.players.get(departingPlayerId)).toMatchObject({ connected: false, eliminated: true, hp: 0 });
+      expect(room.state.battle.standings).toHaveLength(2);
+      expect(room.state.eventSequence).toBe(eventsBeforeLeave + 2);
+
+      const winnerPlayerId = [...room.state.players.keys()][0]!;
+      const standingIds = [...room.state.battle.standings].map((standing) => standing.playerId);
+      await first.leave();
+      await harness.waitForPatch();
+
+      expect(room.state.players.has(winnerPlayerId)).toBe(false);
+      expect([...room.state.battle.standings].map((standing) => standing.playerId)).toEqual(standingIds);
+    } finally {
+      restoreDependencies();
+    }
+  });
+
   it("restores an unexpectedly disconnected participant with the same player record", async () => {
     const harness = await WarRoomHarness.create(colyseus);
     const participant = await harness.joinParticipant("Ada");
@@ -130,6 +185,15 @@ describe("War Room admission", () => {
     resumedOrganizer.send("start_quiz", { commandId: "organizer-resumed", roundId: room.state.roundId });
     await room.waitForNextPatch();
     expect(room.state.phase).toBe("quiz");
+  });
+
+  it("closes the War Room when the organizer explicitly leaves", async () => {
+    const harness = await WarRoomHarness.create(colyseus);
+    const roomId = harness.room.roomId;
+
+    await harness.organizer.leave();
+
+    await expect(colyseus.sdk.joinById(roomId, { displayName: "Ada", protocolVersion: 1 })).rejects.toBeDefined();
   });
 
   it("logs only redacted correlation metadata for rejected traffic", async () => {

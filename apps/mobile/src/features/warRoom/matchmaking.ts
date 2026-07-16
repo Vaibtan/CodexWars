@@ -94,8 +94,7 @@ function normalizeMatchmakingError(error: unknown): WarRoomCommandError {
   const message = error instanceof Error ? error.message : "";
   const exactCode = MATCHMAKING_ERROR_CODES.find((code) => message.includes(code));
   if (exactCode !== undefined) return matchmakingError(exactCode);
-  if (/already full/iu.test(message)) return matchmakingError("ROOM_FULL");
-  if (/\bis locked\b/iu.test(message)) return matchmakingError("ROOM_NOT_JOINABLE");
+  if (/already full|\bis locked\b/iu.test(message)) return matchmakingError("ROOM_FULL");
   if (/not found/iu.test(message)) return matchmakingError("ROOM_NOT_FOUND");
   if (/expired|reconnection token/iu.test(message)) return matchmakingError("SESSION_EXPIRED");
   return matchmakingError("CONNECTION_FAILED");

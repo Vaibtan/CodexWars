@@ -232,7 +232,7 @@ Each client establishes the shared arena origin by recognizing the floor marker.
 
 ### FR-7: Complete battle
 - Eliminated players cannot attack; in P0 they see an eliminated overlay with live standings. Battle ends at last-player-standing or timer expiry; all clients agree on the winner.
-- Organizer reset retains connected identities/nicknames/roles only; it increments `roundId` and clears quiz answers/scores/rewards, localization, positions, readiness, HP/shield, cooldowns, eliminations, and per-round event sequence.
+- Organizer reset retains connected identities/nicknames/roles only; it increments `roundId`, restores the default character and gold palette, and clears quiz answers/scores/rewards, localization, positions, readiness, HP/shield, cooldowns, eliminations, and per-round event sequence. Disconnected participants are removed.
 
 ---
 

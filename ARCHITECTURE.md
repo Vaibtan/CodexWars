@@ -214,20 +214,22 @@ sequenceDiagram
 
     P--xSRV: transport drop (WiFi blip)
     SRV->>SRV: onDrop: player.connected=false, PlayerState retained
-    alt phase = battle
-        SRV->>SRV: start DISCONNECT_ELIMINATION_MS timer (20s)
-    end
+    SRV->>SRV: start 20-second phase-aware reconnect timer
     alt reconnects in time (@colyseus/sdk auto-reconnection)
         P->>SRV: reconnect with session token
         SRV->>SRV: onReconnect: reattach to same PlayerState, connected=true
         SRV-->>P: full state sync (position, HP, charges intact)
         Note over P: if AR session survived, resume battle;<br/>else prompt marker re-scan (position is server-held, not lost)
-    else timer expires during battle
-        SRV->>SRV: eliminate player, broadcast player_eliminated
+    else timer expires before countdown
+        SRV->>SRV: exclude from combat; clear readiness and position
+    else timer expires during countdown/battle
+        SRV->>SRV: eliminate once; evaluate winner; broadcast player_eliminated
     end
 ```
 
-Key property: **position, HP, and rewards live on the server**, so a phone reboot mid-session loses only the AR localization (recoverable by re-scanning the marker) — never the player's game state.
+Key property: **position, HP, and rewards live on the server**, so a brief transport drop does not erase game state. If the AR session no longer has usable localization after reconnect, the participant must re-scan the marker before firing.
+
+An explicit leave is not a reconnectable transport drop. It removes the participant in the lobby/results, excludes them immediately before countdown, or eliminates them immediately during countdown/battle.
 
 Organizer drops follow a different policy: before countdown, the phase stays unchanged and organizer-only commands are unavailable for a 60-second reconnect grace; expiry closes the in-memory room. During countdown/battle the organizer has the same 20-second transport reconnect window as a participant, but expiry does not interrupt the authoritative match and never transfers organizer authority.
 

@@ -25,6 +25,13 @@ export interface ParticipantMember {
 
 export type WarRoomMember = OrganizerMember | ParticipantMember;
 
+export interface ParticipantLeave {
+  readonly disposition: "eliminated" | "removed" | "retained";
+  readonly participant: ParticipantMember;
+}
+
+export type ReconnectExpiryDisposition = "eliminated" | "excluded";
+
 export class WarRoomMembership {
   private readonly membersBySessionId = new Map<string, WarRoomMember>();
   private organizer: OrganizerMember | undefined;
@@ -102,20 +109,55 @@ export class WarRoomMembership {
     return member;
   }
 
-  removeConnectedParticipant(sessionId: string): ParticipantMember | undefined {
+  leaveConnectedOrganizer(sessionId: string): boolean {
+    const member = this.membersBySessionId.get(sessionId);
+    if (member?.kind !== "organizer" || !this.state.organizer.connected) return false;
+    this.state.organizer.connected = false;
+    return true;
+  }
+
+  leaveConnectedParticipant(sessionId: string, now: number): ParticipantLeave | undefined {
     const member = this.membersBySessionId.get(sessionId);
     if (member?.kind !== "participant") return undefined;
     const player = this.state.players.get(member.playerId);
     if (player === undefined || !player.connected) return undefined;
+    if (this.state.phase === "quiz" || this.state.phase === "localization" || this.state.phase === "positioning") {
+      player.combatIncluded = false;
+      player.connected = false;
+      player.disconnectedAt = now;
+      player.positionLocked = false;
+      player.positionX = 0;
+      player.positionZ = 0;
+      player.ready = false;
+      return { disposition: "retained", participant: member };
+    }
+    if (this.state.phase === "countdown" || this.state.phase === "battle") {
+      player.connected = false;
+      player.disconnectedAt = now;
+      if (player.eliminated) return { disposition: "retained", participant: member };
+      player.hp = 0;
+      player.eliminated = true;
+      return { disposition: "eliminated", participant: member };
+    }
     this.state.players.delete(member.playerId);
     this.participantsById.delete(member.playerId);
     this.membersBySessionId.delete(sessionId);
-    return member;
+    return { disposition: "removed", participant: member };
   }
 
   clearCommandOutcomes(): void {
     this.organizer?.commandOutcomes.clear();
     for (const participant of this.participantsById.values()) participant.commandOutcomes.clear();
+  }
+
+  removeDisconnectedParticipants(): void {
+    for (const [playerId, participant] of this.participantsById) {
+      const player = this.state.players.get(playerId);
+      if (player === undefined || player.connected) continue;
+      this.state.players.delete(playerId);
+      this.participantsById.delete(playerId);
+      this.membersBySessionId.delete(participant.sessionId);
+    }
   }
 
   organizerReconnectPolicy(): { readonly closeRoomOnExpiry: boolean; readonly graceMs: number } {
@@ -125,13 +167,23 @@ export class WarRoomMembership {
       : { closeRoomOnExpiry: true, graceMs: BATTLE.HOST_RECONNECT_GRACE_MS };
   }
 
-  participantReconnectExpired(playerId: PlayerId): boolean {
+  participantReconnectExpired(playerId: PlayerId): ReconnectExpiryDisposition | undefined {
     const player = this.state.players.get(playerId);
     const activeBattle = this.state.phase === "countdown" || this.state.phase === "battle";
-    if (player === undefined || player.connected || !activeBattle || player.eliminated) return false;
-    player.hp = 0;
-    player.eliminated = true;
-    return true;
+    if (player === undefined || player.connected) return undefined;
+    if (activeBattle) {
+      if (player.eliminated) return undefined;
+      player.hp = 0;
+      player.eliminated = true;
+      return "eliminated";
+    }
+    if (this.state.phase === "results") return undefined;
+    player.combatIncluded = false;
+    player.positionLocked = false;
+    player.positionX = 0;
+    player.positionZ = 0;
+    player.ready = false;
+    return "excluded";
   }
 
   private markConnected(member: WarRoomMember): void {

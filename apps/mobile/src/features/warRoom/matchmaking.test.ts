@@ -56,6 +56,7 @@ describe("War Room matchmaking", () => {
     [new Error("NICKNAME_INVALID"), "NICKNAME_INVALID", false],
     [new Error('room "9999" not found'), "ROOM_NOT_FOUND", false],
     [new Error("0427 is already full."), "ROOM_FULL", false],
+    [new Error('room "0427" is locked'), "ROOM_FULL", false],
     [new Error("fetch failed at https://internal.example"), "CONNECTION_FAILED", true]
   ] as const)("normalizes dependency failures without leaking raw messages", async (dependencyError, code, retryable) => {
     const adapter = new FakeMatchmakingAdapter();

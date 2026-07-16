@@ -55,7 +55,7 @@ export function isPositionCommand(name: CommandName): boolean {
   return POSITION_COMMAND_NAMES.has(name);
 }
 
-export type RuntimeParseResult = { readonly ok: true; readonly value: ValidatedCommand } | { readonly code: "RATE_LIMITED" | "POSITION_INVALID"; readonly ok: false };
+export type RuntimeParseResult = { readonly ok: true; readonly value: ValidatedCommand } | { readonly code: "RATE_LIMITED" | "POSITION_INVALID" | "WEAPON_INVALID"; readonly ok: false };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -126,9 +126,12 @@ export function parseCommand(name: CommandName, payload: unknown): RuntimeParseR
         ? { ok: true, value: { ...base, command: name, ready: payload.ready } }
         : { code: "POSITION_INVALID", ok: false };
     case "attack":
-      return only(["weaponId", "dirX", "dirZ", "predictedTargetId"]) && payload.weaponId === "bolt" && finite(payload.dirX) && finite(payload.dirZ) && (payload.predictedTargetId === undefined || typeof payload.predictedTargetId === "string")
+      if (!only(["weaponId", "dirX", "dirZ", "predictedTargetId"]) || typeof payload.weaponId !== "string" || !finite(payload.dirX) || !finite(payload.dirZ) || (payload.predictedTargetId !== undefined && typeof payload.predictedTargetId !== "string")) {
+        return { code: "POSITION_INVALID", ok: false };
+      }
+      return payload.weaponId === "bolt"
         ? { ok: true, value: { ...base, command: name, dirX: payload.dirX, dirZ: payload.dirZ, ...(typeof payload.predictedTargetId === "string" ? { predictedTargetId: payload.predictedTargetId } : {}), weaponId: payload.weaponId } }
-        : { code: "POSITION_INVALID", ok: false };
+        : { code: "WEAPON_INVALID", ok: false };
   }
 }
 
