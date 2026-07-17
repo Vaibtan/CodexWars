@@ -16,5 +16,7 @@ jobs:
           node-version: 22.23.1
           cache: npm
       - run: npm ci
+      - run: npm audit --omit=dev --workspace @codexwars/server
       - run: npm run typecheck
       - run: npm test
+      - run: npm run test:secrets

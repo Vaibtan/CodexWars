@@ -1,6 +1,6 @@
 # CodexWars — Build Specification
 
-**Version:** 1.5
+**Version:** 1.6
 **Status:** Active build contract
 **Last updated:** 2026-07-16
 
@@ -9,7 +9,7 @@ This document owns dependency pins, repository boundaries, local development, ve
 ## 1. Build principles
 
 1. Use the committed npm lockfile and exact versions for load-bearing packages.
-2. Keep live room state in one authoritative Colyseus `WarRoom`; P0 has no Firebase, database, account, or internet dependency.
+2. Keep live room state in one authoritative Colyseus `WarRoom`; there is no Firebase, database, or account dependency, and the curated fallback completes a round without internet access.
 3. Keep server game logic platform-neutral. The server receives only validated 2D positions and attack directions.
 4. Keep every Viro import under `apps/mobile/src/ar/`.
 5. Keep the Colyseus SDK behind `apps/mobile/src/features/warRoom/realtimeClient.ts`; screens send typed intents and consume validated snapshots.
@@ -33,6 +33,9 @@ This document owns dependency pins, repository boundaries, local development, ve
 | `@colyseus/ws-transport` | `0.17.13` | Server WebSocket transport |
 | `@colyseus/sdk` | `0.17.43` | Mobile realtime client |
 | `@colyseus/testing` | `0.17.11` | Server integration tests |
+| `ai` | `6.0.228` | Server-only structured generation and tool orchestration |
+| `@ai-sdk/openai` | `3.0.85` | Server-only OpenAI Responses provider compatible with AI SDK 6 |
+| `zod` | `4.1.12` | Runtime schemas for generated content and provider output |
 | Vitest | `4.1.10` | Shared, mobile-adapter, and server tests |
 
 Do not add Firebase packages or restore direct frontend database writes. A future durable product store requires a separate architecture decision and must not become live-room authority.
@@ -47,6 +50,8 @@ apps/
     src/features/warRoom/           # Colyseus adapter, hook, mobile session types
     src/screens/                    # presentation and navigation targets
   server/
+    src/quiz/                       # deep preparation module, validation, provider adapter
+    src/config.ts                   # typed environment configuration
     src/rooms/war-room.ts           # authority, phase machine, private state
     src/rooms/state.ts              # synchronized Schema allow-list
     src/rooms/room-id.ts            # four-digit room allocation
@@ -56,7 +61,7 @@ packages/
     src/constants.ts                # P0 tunables and allow-lists
     src/combat.ts                   # 2D position/attack/result rules
     src/protocol.ts                 # commands, events, projections, runtime guards
-    src/quiz.ts                     # bundled quiz and shield mapping
+    src/quiz.ts                     # curated fallback, quiz validation, shield mapping
     src/types.ts                    # cross-platform domain types
 assets/characters/runtime/          # bundled GLB variants
 docs/                               # supporting specifications and test procedures
@@ -100,14 +105,15 @@ The phone and server must share a network, and the host firewall must allow the 
 
 ### Shared
 
-- Owns protocol guards, public projection types, constants, quiz content, shield mapping, and pure 2D combat.
+- Owns protocol guards, public projection types, constants, curated fallback content, quiz validation, shield mapping, and pure 2D combat.
 - Has no React Native, Viro, Colyseus server, storage, or cloud dependency.
 
 ### Server
 
-- Owns admission, role/player bindings, room phases, clocks, answer privacy, position validation, cooldowns, damage, elimination, results, reset, and reconnect policy.
+- Owns admission, role/player bindings, room phases, clocks, quiz preparation/approval, provider isolation, evidence/review privacy, answer privacy, cost controls, position validation, cooldowns, damage, elimination, results, reset, and reconnect policy.
 - Stores live and private state in memory for the room lifetime.
 - Publishes only the Schema allow-list validated by `isPublicRoomStateProjection`.
+- Reads `OPENAI_API_KEY` only in the server process. Missing configuration reports `fallback_only` readiness and never prevents startup.
 
 ### Mobile
 
@@ -147,7 +153,7 @@ Pass the measurements in `docs/AR_IMPLEMENTATION_SPEC.md` on Android and iPhone.
 
 ### M1 — P0 vertical slice
 
-Create → join → fixed quiz → shield result → character cosmetic → marker localization → safe position lock → ready → 60-second Bolt battle → standings → reset. Exit only after the mixed-platform device flow succeeds twice.
+Create → join → prepare/approve generated or fallback quiz → shield result → character cosmetic → marker localization → safe position lock → ready → 60-second Bolt battle → standings → reset. Exit only after generated-success and fallback-failure rehearsals pass and the mixed-platform device flow succeeds twice.
 
 ### M2 — hardening
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PROGRAMMING_FUNDAMENTALS_V1 } from "@codexwars/shared";
+import { GENERAL_KNOWLEDGE_FALLBACK_V1 } from "@codexwars/shared";
 import { QuizRun, type QuizRunPublisher } from "../src/rooms/quiz-run.js";
 import { PlayerState, WarRoomState } from "../src/rooms/state.js";
 
@@ -21,7 +21,12 @@ function fixture(): { readonly events: PublishedEvent[]; readonly player: Player
     participantEvent: (playerId, type, payload) => events.push({ audience: "participant", payload, playerId, type }),
     roomEvent: (type, payload) => events.push({ audience: "room", payload, type })
   };
-  return { events, player, quizRun: new QuizRun(state, publisher), state };
+  const quizRun = new QuizRun(state, publisher);
+  quizRun.freezeTemplate(GENERAL_KNOWLEDGE_FALLBACK_V1);
+  state.quiz.status = "fallback_ready";
+  state.quiz.source = "fallback";
+  state.quiz.templateId = GENERAL_KNOWLEDGE_FALLBACK_V1.id;
+  return { events, player, quizRun, state };
 }
 
 describe("Quiz Run", () => {
@@ -30,7 +35,7 @@ describe("Quiz Run", () => {
     const now = 1_000;
 
     expect(quizRun.start(now)).toBe(true);
-    const question = PROGRAMMING_FUNDAMENTALS_V1.questions[0]!;
+    const question = GENERAL_KNOWLEDGE_FALLBACK_V1.questions[0]!;
     expect(quizRun.submit(player.playerId, {
       command: "quiz_answer",
       commandId: "answer-1",
@@ -62,7 +67,7 @@ describe("Quiz Run", () => {
 
     quizRun.reset();
 
-    expect(state.quiz).toMatchObject({ questionIndex: -1, status: "ready", submittedCount: 0 });
+    expect(state.quiz).toMatchObject({ questionIndex: -1, status: "unconfigured", submittedCount: 0 });
   });
 
   it("publishes the finalized score and shield only when the Quiz Run completes", () => {
@@ -70,7 +75,7 @@ describe("Quiz Run", () => {
     let now = 1_000;
     expect(quizRun.start(now)).toBe(true);
 
-    for (const [index, question] of PROGRAMMING_FUNDAMENTALS_V1.questions.entries()) {
+    for (const [index, question] of GENERAL_KNOWLEDGE_FALLBACK_V1.questions.entries()) {
       expect(quizRun.submit(player.playerId, {
         command: "quiz_answer",
         commandId: `answer-${index}`,

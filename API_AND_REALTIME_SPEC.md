@@ -1,15 +1,15 @@
-# CodexWars P0 — API and Realtime Specification
+# CodexWars — API and Realtime Specification
 
-**Status:** Authoritative P0 interface contract
-**Version:** 1.4
+**Status:** Authoritative hosted-pilot interface contract
+**Version:** 2.0
 **Last updated:** 2026-07-16
-**Applies to:** M1 hackathon vertical slice
+**Applies to:** M1 vertical slice with pre-deployment quiz preparation
 
-This document is the sole prose authority for P0 room admission, synchronized state, commands, events, errors, timing, ordering, and reconnection. It implements, but does not repeat, the product and structural decisions in:
+This document is the sole prose authority for room admission, synchronized state, quiz preparation, commands, events, errors, timing, ordering, and reconnection. It implements, but does not repeat, the product and structural decisions in:
 
-- `PRD.md` v2.6
-- `BUILD_SPEC.md` v1.5
-- `ARCHITECTURE.md` v1.3
+- `PRD.md` v2.7
+- `BUILD_SPEC.md` v1.6
+- `ARCHITECTURE.md` v1.4
 
 If this contract conflicts with one of those documents, stop implementation and resolve the documents together. Do not silently add a second source of truth.
 
@@ -17,11 +17,11 @@ If this contract conflicts with one of those documents, stop implementation and 
 
 ## 1. Contract scope
 
-- Sessions are nickname-only and in-memory; P0 has no application account/JWT service, persistence, or runtime-cloud interface. Colyseus still validates its short-lived seat and reconnection tokens.
+- Sessions are nickname-only and in-memory; there is no application account/JWT service or persistence. Colyseus still validates its short-lived seat and reconnection tokens.
 - Colyseus matchmaking owns admission. Its four-digit `roomId` is the public code.
 - The server binds one non-combat organizer and up to 12 participant records; role and player authority never come from command payloads.
 - Schema state is recovery truth. Messages carry commands, acknowledgements, errors, and transient effects.
-- The server receives no camera frames, Viro objects, continuous poses, or client-computed hits. P0 uses the fixed bundled quiz, approved cosmetic catalog, and Bolt-only loadout.
+- The server receives no camera frames, Viro objects, continuous poses, or client-computed hits. It prepares a generated or curated-fallback quiz before gameplay, then uses the approved cosmetic catalog and Bolt-only loadout.
 
 ---
 
@@ -31,13 +31,13 @@ The deployment topology is defined in `ARCHITECTURE.md`. This section defines on
 
 ### 2.1 Transport split
 
-| Transport | P0 responsibility |
+| Transport | Responsibility |
 |---|---|
 | HTTP | Operational liveness and readiness only |
 | Colyseus matchmaking | Create a War Room, reserve/consume a seat, or join by `roomId` |
 | Colyseus Schema | Recoverable synchronized room state |
 | Colyseus messages | Validated commands, acknowledgements, errors, and transient effects |
-| Mobile process memory | Connected room/session data and the SDK's current short-lived reconnection token; P0 does not persist it across an app restart |
+| Mobile process memory | Connected room/session data, private organizer quiz preview, and the SDK's current short-lived reconnection token; none persist across an app restart |
 
 There is no REST polling for lobby, quiz, positions, HP, results, or room discovery. P0 configures Schema patches at 100 ms (10 Hz); discrete authoritative events are sent immediately.
 
@@ -51,7 +51,8 @@ Returns `200` when the process event loop can serve requests.
 {
   "status": "ok",
   "service": "codexwars-server",
-  "protocolVersion": 1
+  "protocolVersion": 2,
+  "quizGeneration": "fallback_only"
 }
 ```
 
@@ -65,13 +66,14 @@ Returns `200` after Colyseus initialization and room registration complete; othe
 {
   "status": "ready",
   "service": "codexwars-server",
-  "protocolVersion": 1
+  "protocolVersion": 2,
+  "quizGeneration": "generated"
 }
 ```
 
 The `503` body uses the same fields with `status: "starting"`.
 
-P0 readiness has no Firebase/Firestore check.
+Health/readiness never call OpenAI. `quizGeneration` is `generated` only when generation is enabled and a server-side OpenAI key is configured; otherwise it is `fallback_only`, which remains ready because the curated fallback can complete a round.
 
 ---
 
@@ -81,7 +83,7 @@ P0 readiness has no Firebase/Firestore check.
 
 ```ts
 const room = await client.create("war", {
-  protocolVersion: 1,
+  protocolVersion: 2,
   displayName,
 });
 ```
@@ -100,7 +102,7 @@ The mobile app displays `room.roomId` as the join code.
 
 ```ts
 const room = await client.joinById(roomCode, {
-  protocolVersion: 1,
+  protocolVersion: 2,
   displayName,
 });
 ```
@@ -131,7 +133,7 @@ This protects organizer controls and participant ownership inside a live room wi
 After joining, the mobile adapter registers its private message handlers and requests the already-bound identity:
 
 ```ts
-room.send("request_session", { protocolVersion: 1 });
+room.send("request_session", { protocolVersion: 2 });
 
 type SessionReady =
   | { role: "organizer"; playerId: null }
@@ -194,7 +196,7 @@ Reset increments `roundId`, clears command deduplication, and resets `eventSeque
 
 ### 4.3 Protocol compatibility
 
-- P0 supports protocol version `1` only.
+- The hosted-pilot contract supports protocol version `2` only. Version `1` clients fail before an in-room record is created.
 - Unsupported versions fail during matchmaking validation before an in-room record is created.
 - Unknown fields on security- or authority-sensitive commands are rejected.
 - Shared TypeScript types are compile-time help; server-side runtime validation remains mandatory.
@@ -223,7 +225,7 @@ type OrganizerPublicState = {
 };
 
 type WarRoomState = {
-  protocolVersion: 1;
+  protocolVersion: 2;
   roomId: RoomId;
   phase: RoomPhase;
   roundId: RoundId;
@@ -277,10 +279,19 @@ Selected answers, unrevealed answer keys, reconnection tokens, raw join options,
 
 ```ts
 type QuizStatus =
+  | "unconfigured"
+  | "configured"
+  | "generating"
+  | "awaiting_approval"
   | "ready"
+  | "fallback_ready"
   | "question"
   | "reveal"
   | "completed";
+
+type QuizContentMode = "general_knowledge" | "current_events" | "mixed";
+type QuizCategory = "mixed" | "science" | "history" | "geography" | "culture" | "sports";
+type QuizDifficultyProfile = "accessible" | "balanced" | "challenging";
 
 type PublicQuizQuestion = {
   id: string;
@@ -292,8 +303,14 @@ type PublicQuizQuestion = {
 };
 
 type QuizPublicState = {
-  templateId: "programming-fundamentals-v1";
+  templateId: string;             // empty until a validated template is prepared
   status: QuizStatus;
+  contentMode: QuizContentMode | "";
+  category: QuizCategory | "";
+  difficultyProfile: QuizDifficultyProfile | "";
+  currentEventsLookbackDays: number;
+  source: "" | "generated" | "fallback";
+  regenerationCount: number;
   questionIndex: number;        // -1 before the first question
   questionCount: 10;
   currentQuestion: PublicQuizQuestion; // empty fields/options before and after an active question
@@ -306,7 +323,7 @@ type QuizPublicState = {
 };
 ```
 
-The fixed template and answer key are bundled server data. They are validated at server startup and copied into private room quiz-engine state when selected. No live phase waits for a durable write.
+Only preparation status and safe metadata are synchronized. Candidate questions, future questions, answer keys, evidence, review results, provider responses, prompts, and usage remain private. A generated candidate moves from `generating` to `awaiting_approval`; `approve_quiz` moves it to `ready`. A human-reviewed fallback moves directly to `fallback_ready`. `QuizRun` receives the immutable validated template only when `start_quiz` succeeds. No gameplay phase waits on OpenAI or a durable write.
 
 ### 5.4 Arena and battle state
 
@@ -383,15 +400,30 @@ type ConfigureArena = CommandMeta & { radiusM: number };
 - Radius is finite and within 3–6 m.
 - Minimum spacing is fixed at 1.5 m; marker exclusion is fixed at 0.75 m.
 
-#### `select_quiz_template`
+#### `configure_quiz`
 
 ```ts
-type SelectQuizTemplate = CommandMeta & {
-  templateId: "programming-fundamentals-v1";
+type ConfigureQuiz = CommandMeta & {
+  contentMode: "general_knowledge" | "current_events" | "mixed";
+  category: "mixed" | "science" | "history" | "geography" | "culture" | "sports";
+  difficultyProfile: "accessible" | "balanced" | "challenging";
+  currentEventsLookbackDays: 7 | 14 | 30;
 };
 ```
 
-This is selection, not quiz authoring or persistence. The server copies the validated bundled template into private room state and publishes only its safe projection. P0 may default-select this template on room creation; keeping the explicit command supports the organizer flow without implying multiple templates.
+Allowed only in `lobby` with no in-flight preparation. The payload is an exact allow-list: there is no client-authored prompt text. Success clears the previous template/preview and sets `status=configured`.
+
+#### `prepare_quiz` and `regenerate_quiz`
+
+Both carry only `CommandMeta`. `prepare_quiz` requires `status=configured`; `regenerate_quiz` requires a prepared generated/fallback template and consumes one of the configured per-round regeneration attempts. The acknowledgement means the asynchronous job was admitted, not that preparation completed. The server sets `status=generating`, binds work to `roomId`, `roundId`, and a private preparation ID, and permits at most one in-flight job per room. Disabled generation, exhausted global budget, timeout, provider failure, invalid structure, failed evidence/review, or circuit-open state selects the curated fallback.
+
+#### `cancel_quiz_preparation`
+
+Carries only `CommandMeta`, requires `status=generating`, aborts the active provider request, invalidates its preparation ID, and returns to `status=configured`. A late completion cannot mutate room state.
+
+#### `approve_quiz`
+
+Carries only `CommandMeta` and requires `status=awaiting_approval`. It freezes the current generated template and sets `status=ready`. The fallback is already human-reviewed and uses `fallback_ready`, so it does not require approval.
 
 #### `start_quiz`
 
@@ -399,7 +431,7 @@ This is selection, not quiz authoring or persistence. The server copies the vali
 type StartQuiz = CommandMeta;
 ```
 
-Requirements: `lobby`, template ready, organizer connected, and at least one participant. The server freezes the cohort, enters `quiz`, publishes question 1 without its answer key, sets the authoritative deadline, and automatically runs all ten question/reveal intervals.
+Requirements: `lobby`, status `ready` or `fallback_ready`, frozen validated template, organizer connected, and at least one participant. The server freezes the cohort, enters `quiz`, publishes question 1 without its answer key, sets the authoritative deadline, and automatically runs all ten question/reveal intervals. No provider call is permitted after this transition.
 
 #### `start_battle`
 
@@ -432,7 +464,8 @@ type ResetRound = CommandMeta;
 - Retains connected room members, display names, and server-bound roles.
 - Increments `roundId`.
 - Removes disconnected participants, resets connected participants to the default character and gold palette, and clears quiz answers/scores/rewards, localization, positions, readiness, combat state, command-deduplication state, and per-round `eventSequence`.
-- Returns to `lobby`; no previous-round data remains available after reset.
+- Aborts and invalidates active preparation, clears configuration, template, preview, evidence, review, preparation IDs, generation quota, and provider bookkeeping.
+- Returns to `lobby` with `quiz.status=unconfigured`; no previous-round data remains available after reset.
 
 ### 6.2 Participant commands
 
@@ -626,9 +659,24 @@ type QuizCompleted = {
   questionCount: 10;
   startingShield: number;
 };
+
+type QuizPrepared = {
+  roundId: RoundId;
+  preparationId: string;
+  templateId: string;
+  source: "generated" | "fallback";
+  generatedAt: number;
+  questions: PublicQuizQuestion[];
+  sources: Array<{
+    title: string;
+    url: string;
+    publisher: string;
+    publishedAt?: string;
+  }>;
+};
 ```
 
-Answer result and quiz completion are sent privately to their participant. Organizer-visible completion and finalized totals are state.
+`quiz_prepared` is sent privately to the organizer after preparation and again after organizer reconnection while approval/start remains possible. It contains the preview and evidence surface but never the answer key, provider response, hidden review, prompt, or credentials. Answer result and quiz completion are sent privately to their participant. Organizer-visible completion and finalized totals are state.
 
 ### 7.3 Battle events
 
@@ -667,7 +715,7 @@ Clients apply an event effect only when `roundId` matches and `eventSequence` is
 
 ### 8.1 Reconnection flow
 
-The mobile adapter retains `room.reconnectionToken` only for the active session and calls the Colyseus reconnect flow after an unintentional drop. On successful `onReconnect`, the server reattaches the connection to the same organizer/player record and sends current state.
+The mobile adapter retains `room.reconnectionToken` only for the active session and calls the Colyseus reconnect flow after an unintentional drop. On successful `onReconnect`, the server reattaches the connection to the same organizer/player record and sends current state. If a quiz preview is still relevant, the server privately re-sends it to the organizer; reconnection never restarts preparation.
 
 The client must distinguish:
 
@@ -693,7 +741,7 @@ Do not log or include reconnection tokens in analytics, errors, or synchronized 
 
 ### 8.4 Room expiry and restart
 
-Rooms expire after two hours without a successful join, reconnect, or accepted in-room command, or when the organizer pre-battle grace policy closes them. A process restart ends every room. P0 deliberately provides no room resurrection or durable result recovery.
+Rooms expire after two hours without a successful join, reconnect, or accepted in-room command, or when the organizer pre-battle grace policy closes them. Disposal and graceful shutdown abort in-flight preparation and release room IDs. A process restart ends every room; there is no room resurrection or durable result recovery.
 
 ---
 
@@ -714,6 +762,10 @@ Matchmaking rejections originate from Colyseus lifecycle errors, while in-room f
 | `ROUND_MISMATCH` | Message | Command belongs to another round | No; resync |
 | `COMMAND_DUPLICATE` | Reserved | Declared for compatibility but not emitted in P0; an exact replay receives the cached `command_accepted` acknowledgement | No action needed |
 | `PHASE_MISMATCH` | Message | Command is illegal in current phase | Usually no |
+| `QUIZ_CONFIG_INVALID` | Message | Quiz configuration is unknown, out of range, or contains extra fields | No |
+| `QUIZ_GENERATION_IN_PROGRESS` | Message | A preparation job already owns the room slot | Yes after completion/cancel |
+| `QUIZ_GENERATION_LIMIT_REACHED` | Message | Per-round regeneration allowance is exhausted | No until reset |
+| `QUIZ_APPROVAL_REQUIRED` | Message | Generated content is prepared but not organizer-approved | Yes after approval |
 | `QUIZ_NOT_READY` | Message | Quiz start precondition failed | Yes |
 | `QUESTION_MISMATCH` | Message | Answer references another question | No |
 | `ANSWER_OPTION_INVALID` | Message | Option is not on current question | No |
@@ -732,24 +784,27 @@ Matchmaking rejections originate from Colyseus lifecycle errors, while in-room f
 | `WEAPON_INVALID` | Message | Weapon differs from fixed loadout | No |
 | `RATE_LIMITED` | Message | Raw command attempt limit exceeded | Yes |
 
-P0 has no auth-token, template-storage, or persistence-unavailable errors because those services are not in its runtime path.
+Provider names, billing state, raw dependency messages, and stack traces never become error codes or messages. Provider failures select the fallback and are visible only through redacted operational outcomes.
 
 ---
 
 ## 10. Abuse controls, payload limits, and logs
 
-The LAN demo does not need internet-grade account abuse controls, but it still needs bounded input:
+The hosted pilot is nickname-only, so admission and model-backed preparation are explicitly bounded:
 
-- Hosted matchmaking throttles are deferred to the required M3 threat-model review; the P0 LAN server applies no per-IP admission quota.
+- Trusted-proxy-normalized per-IP windows limit room creation, room-code joins, and rejected enumeration attempts.
+- One preparation runs per room; server-wide generation concurrency, daily generation/search budgets, provider token limits, hard timeouts, and at most one transient retry bound upstream cost.
+- Each round has a bounded regeneration allowance. Global budget/circuit-open outcomes select fallback without starting an upstream request.
+- Organizer quiz input is allow-listed enums and small integers only; no free-form text is concatenated into privileged model instructions.
 - `quiz_answer`: one accepted answer and at most five malformed attempts per participant/question.
 - Localization, position, and readiness commands: maximum 5/s per client.
 - `attack`: weapon cooldown is authoritative; cap raw attempts at 10/s and reject excess attempts with `RATE_LIMITED`.
 - Maximum room command payload: 2 KiB.
 - Display names are normalized, rendered as text, never used as identifiers, and suffixed server-side on duplicates.
-- Logs use correlation ID, hashed room ID, player ID, event type, and stable error code.
-- Logs redact nicknames, reconnection tokens, answer choices, and coordinates by default.
+- Logs use correlation ID, hashed room ID, player ID, event type, stable outcome/error code, model snapshot, prompt version, latency, token counts, source count, and estimated cost where available.
+- Logs redact nicknames, reconnection tokens, quiz prompts/options/answers/explanations, source URLs, provider payloads, credentials, and coordinates by default.
 
-Room-code enumeration resistance becomes important for an internet-hosted product. Four decimal digits are a convenience code, not a security boundary; M3 must add explicit hosted threat modeling before pilots.
+Four decimal digits remain a convenience code, not a security boundary. Enumeration throttles prevent room probing from triggering preparation or unbounded work.
 
 ---
 
@@ -761,7 +816,7 @@ Room-code enumeration resistance becomes important for an internet-hosted produc
 - Unknown authority-sensitive fields reject.
 - Protocol mismatch fails before a room member record is created.
 - Schema snapshots contain no role claim input, token, selected answer, unrevealed answer key, or AR pose.
-- P0 server boots and completes a round with no internet/Firebase configuration.
+- Server boots and completes a fallback round with no internet/OpenAI/Firebase configuration.
 
 ### 11.2 Matchmaking and session authority
 
@@ -777,14 +832,19 @@ Room-code enumeration resistance becomes important for an internet-hosted produc
 
 ### 11.3 Quiz
 
-- Bundled template validates exactly ten questions at startup.
+- Curated fallback validates exactly ten questions at startup and contains no time-sensitive claims.
+- Quiz configuration accepts only exact allow-listed payloads and rejects unknown fields before work admission.
+- Generated success, disabled generation, missing key, timeout, cancellation, malformed output, failed evidence/review, exhausted budget, and circuit-open paths are deterministic under injected adapters.
+- Only one job runs per room; duplicate command IDs and stale completion after reset/disposal/cancel cannot start or commit duplicate work.
+- Generated candidates require organizer approval; fallback candidates are immediately startable.
+- Preview is organizer-private and excludes answer keys/review/provider payload; participant state never contains future questions.
 - Start freezes the cohort.
 - Receipt before deadline accepts; exact deadline rejects.
 - Duplicate semantic answer and duplicate `commandId` cannot score twice.
 - Correct answer never leaks before reveal.
 - Missing/disconnected answer scores zero and timers advance.
 - Shield bands match all scores 0–10.
-- Quiz completion advances without a persistence dependency.
+- Quiz completion advances without a provider or persistence dependency.
 - Reconnect restores current question, deadline, and own accepted-answer boolean.
 
 ### 11.4 Positioning and battle

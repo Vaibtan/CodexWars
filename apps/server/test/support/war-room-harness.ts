@@ -1,6 +1,6 @@
 import type { Room as ClientRoom } from "@colyseus/sdk";
 import type { ColyseusTestServer } from "@colyseus/testing";
-import { PROGRAMMING_FUNDAMENTALS_V1, type ClientEventPayloads } from "@codexwars/shared";
+import { GENERAL_KNOWLEDGE_FALLBACK_V1, PROTOCOL_VERSION, type ClientEventPayloads } from "@codexwars/shared";
 import type { WarRoom } from "../../src/rooms/war-room.js";
 
 export class WarRoomHarness {
@@ -17,7 +17,7 @@ export class WarRoomHarness {
   }
 
   static async create(server: ColyseusTestServer, organizerName = "Teacher"): Promise<WarRoomHarness> {
-    const options = { displayName: organizerName, protocolVersion: 1 };
+    const options = { displayName: organizerName, protocolVersion: PROTOCOL_VERSION };
     const room = await server.createRoom<WarRoom>("war", options);
     const organizer = await server.connectTo(room, options);
     return new WarRoomHarness(server, room, organizer);
@@ -36,7 +36,7 @@ export class WarRoomHarness {
   }
 
   async joinParticipant(displayName: string): Promise<ClientRoom> {
-    return this.server.connectTo(this.room, { displayName, protocolVersion: 1 });
+    return this.server.connectTo(this.room, { displayName, protocolVersion: PROTOCOL_VERSION });
   }
 
   async reconnect(reconnectionToken: string): Promise<ClientRoom> {
@@ -52,13 +52,27 @@ export class WarRoomHarness {
   }
 
   async completeQuiz(setNow: (now: number) => void): Promise<void> {
+    if (this.room.state.quiz.status === "unconfigured") await this.prepareQuiz();
     await this.sendAndPatch(this.organizer, "start_quiz", this.command());
     await this.finishQuiz(setNow);
   }
 
+  async prepareQuiz(): Promise<void> {
+    await this.sendAndPatch(this.organizer, "configure_quiz", {
+      ...this.command(),
+      category: "mixed",
+      contentMode: "general_knowledge",
+      currentEventsLookbackDays: 14,
+      difficultyProfile: "balanced"
+    });
+    await this.sendAndPatch(this.organizer, "prepare_quiz", this.command());
+    while (this.room.state.quiz.status === "generating") await this.waitForPatch();
+    if (this.room.state.quiz.status === "awaiting_approval") await this.sendAndPatch(this.organizer, "approve_quiz", this.command());
+  }
+
   async finishQuiz(setNow: (now: number) => void): Promise<void> {
     const firstQuestionIndex = this.room.state.quiz.questionIndex;
-    for (const question of PROGRAMMING_FUNDAMENTALS_V1.questions.slice(firstQuestionIndex)) {
+    for (const question of GENERAL_KNOWLEDGE_FALLBACK_V1.questions.slice(firstQuestionIndex)) {
       if (this.room.state.quiz.currentQuestion.id !== question.id) throw new Error(`Expected Quiz Run question ${question.id}`);
       setNow(this.room.state.quiz.questionEndsAt);
       await this.waitForPatch();

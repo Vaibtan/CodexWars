@@ -8,6 +8,7 @@ import {
   type LocalizationState,
   type PlayerId,
   type PublicRoomState,
+  type QuizConfiguration,
 } from "@codexwars/shared";
 import { WarRoomCommandError } from "./errors";
 import type { WarRoomRole, WarRoomSession } from "./types";
@@ -19,6 +20,11 @@ export type Unsubscribe = () => void;
 export type WarRoomIntent =
   | { readonly included: boolean; readonly playerId: PlayerId; readonly type: "set_combat_included" }
   | { readonly radiusM: number; readonly type: "configure_arena" }
+  | ({ readonly type: "configure_quiz" } & QuizConfiguration)
+  | { readonly type: "prepare_quiz" }
+  | { readonly type: "regenerate_quiz" }
+  | { readonly type: "cancel_quiz_preparation" }
+  | { readonly type: "approve_quiz" }
   | { readonly type: "start_quiz" }
   | { readonly selection: CharacterSelection; readonly type: "select_character" }
   | { readonly optionId: string; readonly questionId: string; readonly type: "quiz_answer" }
@@ -37,6 +43,7 @@ export interface WarRoomSnapshot {
   readonly error: Error | null;
   readonly loading: boolean;
   readonly room: PublicRoomState | null;
+  readonly quizPreview: ClientEventPayloads["quiz_prepared"] | null;
   readonly session: WarRoomSession;
 }
 
@@ -87,11 +94,12 @@ class ColyseusWarRoomClient implements WarRoomRealtimeClient {
     private readonly transport: RealtimeTransport,
     readonly session: WarRoomSession,
   ) {
-    this.snapshot = { connected: true, error: null, loading: true, room: null, session };
+    this.snapshot = { connected: true, error: null, loading: true, quizPreview: null, room: null, session };
     this.unsubscribers = [
       transport.onStateChange((state) => this.receiveState(state)),
       transport.onMessage("command_accepted", (payload) => this.receiveCommandAccepted(payload)),
       transport.onMessage("server_error", (payload) => this.receiveServerError(payload)),
+      transport.onMessage("quiz_prepared", (payload) => this.receiveQuizPrepared(payload)),
       transport.onDrop(() => this.updateConnection(false)),
       transport.onReconnect(() => this.updateConnection(true)),
       transport.onError(() => this.setError(new WarRoomCommandError("The War Room connection was interrupted. Reconnecting may resolve it.", "CONNECTION_FAILED", true))),
@@ -184,7 +192,18 @@ class ColyseusWarRoomClient implements WarRoomRealtimeClient {
       this.setError(new Error("War Room state did not match the joined room."));
       return;
     }
-    this.snapshot = { ...this.snapshot, error: null, loading: false, room: state };
+    const clearPreview = this.snapshot.room?.roundId !== state.roundId || state.quiz.status === "unconfigured" || state.quiz.status === "configured";
+    this.snapshot = { ...this.snapshot, error: null, loading: false, ...(clearPreview ? { quizPreview: null } : {}), room: state };
+    this.emit();
+  }
+
+  private receiveQuizPrepared(payload: unknown): void {
+    if (this.session.role !== "organizer" || !isClientEventPayload("quiz_prepared", payload)) {
+      this.setError(new Error("Invalid private quiz preview received from the War Room server."));
+      return;
+    }
+    if (this.snapshot.room !== null && payload.roundId !== this.snapshot.room.roundId) return;
+    this.snapshot = { ...this.snapshot, quizPreview: payload };
     this.emit();
   }
 
@@ -268,6 +287,11 @@ function commandPayload(
   switch (intent.type) {
     case "set_combat_included": return { name: intent.type, payload: { ...meta, included: intent.included, playerId: intent.playerId } };
     case "configure_arena": return { name: intent.type, payload: { ...meta, radiusM: intent.radiusM } };
+    case "configure_quiz": return { name: intent.type, payload: { ...meta, category: intent.category, contentMode: intent.contentMode, currentEventsLookbackDays: intent.currentEventsLookbackDays, difficultyProfile: intent.difficultyProfile } };
+    case "approve_quiz":
+    case "cancel_quiz_preparation":
+    case "prepare_quiz":
+    case "regenerate_quiz":
     case "start_quiz":
     case "unlock_position":
     case "start_battle":

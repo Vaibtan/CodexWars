@@ -1,6 +1,6 @@
 import { ArraySchema, defineTypes, MapSchema, Schema } from "@colyseus/schema";
 import { ARENA, BATTLE, PROTOCOL_VERSION, QUIZ, WEAPONS } from "@codexwars/shared";
-import type { BattleStatus, CharacterColorId, CharacterId, LocalizationState, QuizDifficulty, QuizStatus, RoomPhase, WeaponId } from "@codexwars/shared";
+import type { BattleStatus, CharacterColorId, CharacterId, CurrentEventsLookbackDays, LocalizationState, QuizCategory, QuizContentMode, QuizDifficulty, QuizDifficultyProfile, QuizStatus, QuizTemplateSource, RoomPhase, WeaponId } from "@codexwars/shared";
 
 export class OrganizerState extends Schema {
   connected = false;
@@ -54,8 +54,14 @@ export class QuizQuestionState extends Schema {
 }
 
 export class QuizState extends Schema {
-  templateId = QUIZ.TEMPLATE_ID;
-  status: QuizStatus = "ready";
+  templateId = "";
+  status: QuizStatus = "unconfigured";
+  contentMode: QuizContentMode | "" = "";
+  category: QuizCategory | "" = "";
+  difficultyProfile: QuizDifficultyProfile | "" = "";
+  currentEventsLookbackDays: CurrentEventsLookbackDays | 0 = 0;
+  source: QuizTemplateSource | "" = "";
+  regenerationCount = 0;
   questionIndex = -1;
   questionCount = QUIZ.QUESTION_COUNT;
   currentQuestion = new QuizQuestionState();
@@ -107,7 +113,7 @@ defineTypes(PlayerState, {
 defineTypes(ArenaState, { configured: "boolean", markerExclusionRadiusM: "number", minimumSpacingM: "number", radiusM: "number" });
 defineTypes(QuizOptionState, { id: "string", label: "string" });
 defineTypes(QuizQuestionState, { difficulty: "string", durationMs: "number", id: "string", options: [QuizOptionState], order: "number", prompt: "string" });
-defineTypes(QuizState, { currentQuestion: QuizQuestionState, eligibleCount: "number", questionCount: "number", questionEndsAt: "number", questionIndex: "number", revealEndsAt: "number", revealedCorrectOptionId: "string", revealedExplanation: "string", status: "string", submittedCount: "number", templateId: "string" });
+defineTypes(QuizState, { category: "string", contentMode: "string", currentEventsLookbackDays: "number", currentQuestion: QuizQuestionState, difficultyProfile: "string", eligibleCount: "number", questionCount: "number", questionEndsAt: "number", questionIndex: "number", regenerationCount: "number", revealEndsAt: "number", revealedCorrectOptionId: "string", revealedExplanation: "string", source: "string", status: "string", submittedCount: "number", templateId: "string" });
 defineTypes(StandingState, { correctAnswers: "number", displayName: "string", eliminated: "boolean", hp: "number", playerId: "string", rank: "number", shield: "number" });
 defineTypes(BattleState, { completionReason: "string", endsAt: "number", standings: [StandingState], startsAt: "number", status: "string", winnerId: "string" });
 defineTypes(WarRoomState, { arena: ArenaState, battle: BattleState, eventSequence: "number", organizer: OrganizerState, phase: "string", players: { map: PlayerState }, protocolVersion: "number", quiz: QuizState, roomId: "string", roundId: "number", serverNow: "number" });

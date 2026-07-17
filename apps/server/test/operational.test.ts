@@ -17,7 +17,7 @@ afterEach(async () => {
 });
 
 async function start(isReady: () => boolean): Promise<string> {
-  server = createOperationalServer({ isReady });
+  server = createOperationalServer({ generationCapability: "fallback_only", isReady });
   await new Promise<void>((resolve) => server?.listen(0, "127.0.0.1", resolve));
   const address = server.address();
 
@@ -36,7 +36,8 @@ describe("operational HTTP interface", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
-      protocolVersion: 1,
+      protocolVersion: 2,
+      quizGeneration: "fallback_only",
       service: "codexwars-server",
       status: "ok"
     });
@@ -49,7 +50,8 @@ describe("operational HTTP interface", () => {
     const beforeRegistration = await fetch(`${baseUrl}/ready`);
     expect(beforeRegistration.status).toBe(503);
     await expect(beforeRegistration.json()).resolves.toEqual({
-      protocolVersion: 1,
+      protocolVersion: 2,
+      quizGeneration: "fallback_only",
       service: "codexwars-server",
       status: "starting"
     });
@@ -58,7 +60,8 @@ describe("operational HTTP interface", () => {
     const afterRegistration = await fetch(`${baseUrl}/ready`);
     expect(afterRegistration.status).toBe(200);
     await expect(afterRegistration.json()).resolves.toEqual({
-      protocolVersion: 1,
+      protocolVersion: 2,
+      quizGeneration: "fallback_only",
       service: "codexwars-server",
       status: "ready"
     });

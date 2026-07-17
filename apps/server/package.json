@@ -7,14 +7,18 @@
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "test": "vitest run",
+    "test:openai-live": "node --env-file=../../.env ../../node_modules/vitest/vitest.mjs run --config vitest.live.config.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@ai-sdk/openai": "3.0.85",
     "@codexwars/shared": "0.1.0",
     "@colyseus/core": "0.17.44",
     "@colyseus/schema": "4.0.27",
     "@colyseus/ws-transport": "0.17.13",
-    "express": "5.2.1"
+    "ai": "6.0.228",
+    "express": "5.2.1",
+    "zod": "4.1.12"
   },
   "devDependencies": {
     "@colyseus/sdk": "0.17.43",

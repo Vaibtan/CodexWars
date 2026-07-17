@@ -1,8 +1,8 @@
 # CodexWars — Architecture Design
 
-**Version:** 1.3
+**Version:** 1.4
 **Last updated:** 2026-07-16
-**Companions:** `PRD.md` v2.6 (what and why) · `BUILD_SPEC.md` v1.5 (stack, repository, verification) · `API_AND_REALTIME_SPEC.md` v1.4 (exact P0 interface contract) · `docs/AR_IMPLEMENTATION_SPEC.md` (marker/device contract)
+**Companions:** `PRD.md` v2.7 (what and why) · `BUILD_SPEC.md` v1.6 (stack, repository, verification) · `API_AND_REALTIME_SPEC.md` v2.0 (exact interface contract) · `docs/AR_IMPLEMENTATION_SPEC.md` (marker/device contract)
 **This document:** the structural and runtime design — components, deployment, critical sequences, state machines, and invariants. Diagrams here are the reference during implementation; if code and this doc disagree, fix one of them in the same commit.
 
 ---
@@ -23,11 +23,11 @@ All three compile against `packages/shared` (types, protocol, constants, pure ga
 
 ## 2. Deployment view
 
-### Demo / development topology (M0–M2)
+### Demo / hosted-pilot topology (M0–M2)
 
 ```mermaid
 flowchart TB
-    subgraph HOTSPOT["Phone hotspot or laptop hotspot (LAN, no internet needed)"]
+    subgraph HOTSPOT["Shared LAN or hosted WebSocket endpoint"]
         subgraph LAPTOP["Windows laptop"]
             SRV["Colyseus server (Node 22.23.1)<br/>in-memory state only"]
         end
@@ -36,15 +36,17 @@ flowchart TB
         P3["Participant phone 2..12<br/>(mixed platform)"]
     end
     MARKER["Printed A4 marker on floor<br/>(shared coordinate origin — passive, no electronics)"]
+    OPENAI["OpenAI Responses API<br/>optional quiz preparation only"]
     P1 <-->|WebSocket| SRV
     P2 <-->|WebSocket| SRV
     P3 <-->|WebSocket| SRV
+    SRV -.->|"prepare before gameplay"| OPENAI
     P1 -.camera.-> MARKER
     P2 -.camera.-> MARKER
     P3 -.camera.-> MARKER
 ```
 
-Properties: no cloud services, no internet, one Wi-Fi hop between every phone and the server. The marker is the only "shared infrastructure" and it's a piece of paper.
+Properties: one authoritative Node process owns every live room. OpenAI is an optional preparation dependency and is never contacted after a quiz template is frozen. Without an API key, internet, budget, or valid provider result, the server selects the bundled fallback and the same gameplay path completes. Phones communicate only with Colyseus and never receive provider credentials.
 
 ### Product topology (M3+)
 A single-node hosted pilot preserves the `WarRoom` and protocol interfaces, but deployment is not a URL-only change: it adds TLS/WSS termination, WebSocket-aware ingress, health checks, process supervision, observability, abuse throttling, and client/server compatibility policy. Horizontal scale adds shared Colyseus Presence/Driver, room placement, and durable product storage outside live room state. M3 begins with a dedicated hosted-architecture review.
@@ -73,13 +75,16 @@ flowchart TB
         CODES["roomId.ts<br/>unique 4-digit roomId allocation"]
         ROOM["rooms/war-room.ts<br/>lifecycle · phase machine · validation"]
         SCHEMA["rooms/state.ts<br/>Colyseus synced state"]
+        PREP["quiz/QuizPreparation<br/>generation · grounding · review · fallback"]
+        MODEL["quiz/OpenAI adapter<br/>AI SDK + Responses web search"]
+        CONFIG["config.ts<br/>typed limits · capability · secrets"]
     end
 
     subgraph SHARED["packages/shared"]
         PROTO["protocol.ts"]
         CONST["constants.ts (all tunables)"]
         COMBAT["combat.ts<br/>position, attack, damage, standings"]
-        QUIZ["quiz.ts<br/>bundled template and rewards"]
+        QUIZ["quiz.ts<br/>curated fallback, validation, rewards"]
     end
 
     SESSION --> COORD
@@ -89,17 +94,51 @@ flowchart TB
     SCREENS --> HUD & NET
     ROOMHOOK <--> NET
     NET <-->|"WebSocket"| ROOM
-    ROOM --> SCHEMA & CODES
-    ROOM -->|authoritative| COMBAT & QUIZ
+    ROOM --> SCHEMA & CODES & PREP
+    PREP --> MODEL & QUIZ & CONFIG
+    ROOM -->|authoritative| COMBAT
     SCREENS -->|target highlight only| COMBAT
     SHARED -.types.- MOBILE & SERVER
 ```
 
-Dependency direction is strictly downward into `shared`; `shared` imports nothing from anywhere (zero runtime deps — enforced in its `package.json`).
+`WarRoom` depends only on the `QuizPreparation.prepare(request, signal)` interface. Provider types, web-search orchestration, retries, evidence policy, review, budgets, and fallback selection remain inside `apps/server/src/quiz/`. `QuizRun` consumes an immutable validated `QuizTemplate` and performs no external calls. Dependency direction remains downward into `shared`; `shared` imports nothing from `apps`.
 
 ---
 
-## 4. Runtime sequences (the five that matter)
+## 4. Runtime sequences
+
+### 4.0 Quiz preparation and approval
+
+```mermaid
+sequenceDiagram
+    participant ORG as Organizer app
+    participant ROOM as WarRoom
+    participant PREP as QuizPreparation
+    participant MODEL as QuizModelPort
+
+    ORG->>ROOM: configure_quiz (bounded enums)
+    ORG->>ROOM: prepare_quiz
+    ROOM-->>ORG: command_accepted
+    ROOM->>PREP: prepare(request, AbortSignal)
+    alt generation enabled and budget available
+        PREP->>MODEL: discover grounded evidence with web search
+        MODEL-->>PREP: evidence brief + provider sources
+        PREP->>MODEL: generate bounded candidate buffer using source IDs
+        MODEL-->>PREP: structured candidates
+        PREP->>MODEL: structured semantic review
+        MODEL-->>PREP: per-question review results
+        PREP->>PREP: select exactly ten approved questions or fallback
+        PREP-->>ROOM: validated generated template
+        ROOM-->>ORG: private quiz_prepared preview
+        ORG->>ROOM: approve_quiz
+    else disabled, failed, invalid, timed out, or over budget
+        PREP-->>ROOM: validated curated fallback
+    end
+    ROOM->>ROOM: freeze immutable template
+    ORG->>ROOM: start_quiz
+```
+
+Every request is bound to `roomId`, `roundId`, and a server preparation ID. Reset, disposal, cancellation, or a newer request aborts the old work; late completions fail the identity check and cannot mutate the room. Generated templates require organizer approval. The human-reviewed fallback is immediately startable and exposes only `fallback_ready` in public state.
 
 ### 4.1 Room creation and join bootstrap
 
@@ -242,7 +281,8 @@ Organizer drops follow a different policy: before countdown, the phase stays unc
 ```mermaid
 stateDiagram-v2
     [*] --> lobby: matchmaker creates WarRoom
-    lobby --> quiz: organizer start_quiz
+    lobby --> lobby: configure / prepare / approve quiz
+    lobby --> quiz: organizer start_quiz with frozen template
     quiz --> localization: final reveal completes
     localization --> positioning: arena configured ∧ all combat participants localized
     positioning --> countdown: start_battle ∧ start invariant holds
@@ -300,6 +340,8 @@ Y is discarded at the `ar/` boundary. There is no coordinate translation on the 
 | Role, phase, `roundId`, `eventSequence`, `startsAt`, `serverNow`, combat inclusion, positions, HP/shield/charges, eliminations, winner | **Server only** | all clients via state sync |
 | Localization status, ready flag, quiz answers, attack commands | Owning client (as *requests*) | server validates, then owns the result |
 | Combat inclusion | Organizer (as a request) | server validates, then owns the result |
+| Quiz configuration, preparation, approval, cancellation | Organizer (as bounded requests) | server prepares and freezes the result; provider output is never authority until validated |
+| Answer keys, evidence, review results, provider usage | **Server-private** | organizer receives only the approved private preview/source surface; participants receive each active question and post-close reveal |
 | Timestamped live aim pose, pose quality/freshness, predicted target, effect animations | Owning client only | never continuously networked (fresh aim ships only inside discrete `attack` messages) |
 
 This is why bandwidth stays trivial: continuous data (aim at 10 Hz) never crosses the network; only button presses and server verdicts do.
@@ -322,6 +364,9 @@ Checked in code review and, where possible, by tests:
 10. **I-10** The organizer is non-combat in P0, does not consume participant capacity, and organizer commands require the server-bound role.
 11. **I-11** Every combat command/result carries `roundId`; commands are deduplicated by `commandId`, and clients apply authoritative events once in `eventSequence` order.
 12. **I-12** No attack is emitted from a pose older than `AIM_POSE_STALE_MS`; the locked server position may survive tracking loss, but a frozen aim may not.
+13. **I-13** No provider call occurs after `start_quiz`; all participants play one frozen template and identical scoring rules.
+14. **I-14** OpenAI types, credentials, prompts, evidence, and retry policy remain inside the server quiz-preparation boundary.
+15. **I-15** Missing/failed/exhausted generation degrades to the curated fallback and never changes server readiness or gameplay semantics.
 
 ---
 

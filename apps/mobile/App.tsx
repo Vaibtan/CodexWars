@@ -121,7 +121,7 @@ export default function App() {
       {screen === "demo-story" && <DemoStoryScreen onDone={() => setScreen("home")} />}
       {screen === "ar-character-test" && <ArCharacterTestScreen onDone={() => setScreen("home")} />}
       {screen === "organizer-dashboard" && client && warRoom.room && (
-        <OrganizerDashboardScreen client={client} connected={warRoom.connected} onLeave={leaveRoom} room={warRoom.room} />
+        <OrganizerDashboardScreen client={client} connected={warRoom.connected} onLeave={leaveRoom} quizPreview={warRoom.quizPreview} room={warRoom.room} />
       )}
       {screen === "quiz-waiting" && session && (
         <QuizWaitingScreen connected={warRoom.connected} onLeave={leaveRoom} room={warRoom.room} session={session} />

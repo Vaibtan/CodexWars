@@ -1,13 +1,14 @@
 import { ArraySchema } from "@colyseus/schema";
 import {
-  PROGRAMMING_FUNDAMENTALS_V1,
   MAX_MALFORMED_QUIZ_ATTEMPTS,
   QUIZ,
   publicQuizQuestion,
   startingShieldForScore,
+  validateQuizTemplate,
   type ClientEventPayloads,
   type ErrorCode,
   type PlayerId,
+  type QuizTemplate,
   type ServerEventPayloads,
   type ValidatedCommand
 } from "@codexwars/shared";
@@ -32,20 +33,29 @@ type QuizSubmission = { readonly ok: true } | { readonly code: ErrorCode; readon
 export class QuizRun {
   private frozenCohort = new Set<PlayerId>();
   private readonly participants = new Map<PlayerId, ParticipantQuizState>();
+  private template: QuizTemplate | undefined;
 
   constructor(
     private readonly state: WarRoomState,
     private readonly publisher: QuizRunPublisher
   ) {}
 
-  selectTemplate(): boolean {
+  freezeTemplate(template: QuizTemplate): boolean {
+    if (this.state.phase !== "lobby" || this.template !== undefined || !validateQuizTemplate(template).ok) return false;
+    this.template = template;
+    return true;
+  }
+
+  discardTemplate(): boolean {
     if (this.state.phase !== "lobby") return false;
-    this.state.quiz.status = "ready";
+    this.template = undefined;
+    this.frozenCohort.clear();
+    this.participants.clear();
     return true;
   }
 
   start(now: number): boolean {
-    if (this.state.phase !== "lobby" || this.state.players.size === 0 || this.state.quiz.status !== "ready") return false;
+    if (this.state.phase !== "lobby" || this.state.players.size === 0 || this.template === undefined || (this.state.quiz.status !== "ready" && this.state.quiz.status !== "fallback_ready")) return false;
     this.frozenCohort = new Set(this.state.players.keys());
     for (const playerId of this.frozenCohort) this.participantState(playerId);
     this.state.quiz.eligibleCount = this.frozenCohort.size;
@@ -55,7 +65,7 @@ export class QuizRun {
   }
 
   submit(playerId: PlayerId, command: Extract<ValidatedCommand, { command: "quiz_answer" }>, now: number): QuizSubmission {
-    const question = PROGRAMMING_FUNDAMENTALS_V1.questions[this.state.quiz.questionIndex];
+    const question = this.template?.questions[this.state.quiz.questionIndex];
     const player = this.state.players.get(playerId);
     if (question === undefined || player === undefined || !this.frozenCohort.has(playerId) || this.state.quiz.status !== "question") {
       return { code: "PHASE_MISMATCH", ok: false };
@@ -105,12 +115,13 @@ export class QuizRun {
 
   reset(): void {
     this.state.quiz = new QuizState();
+    this.template = undefined;
     this.frozenCohort.clear();
     this.participants.clear();
   }
 
   private startQuestion(questionIndex: number, now: number): void {
-    const question = PROGRAMMING_FUNDAMENTALS_V1.questions[questionIndex];
+    const question = this.template?.questions[questionIndex];
     if (question === undefined) {
       this.completeQuiz();
       return;
@@ -135,7 +146,7 @@ export class QuizRun {
   }
 
   private revealQuestion(now: number): void {
-    const question = PROGRAMMING_FUNDAMENTALS_V1.questions[this.state.quiz.questionIndex];
+    const question = this.template?.questions[this.state.quiz.questionIndex];
     if (question === undefined) return;
     this.state.quiz.status = "reveal";
     this.state.quiz.revealedCorrectOptionId = question.answerOptionId;
@@ -178,7 +189,7 @@ export class QuizRun {
       player.shield = startingShieldForScore(correctAnswers);
       this.publisher.participantEvent(playerId, "quiz_completed", {
         correctAnswers,
-        questionCount: QUIZ.QUESTION_COUNT,
+        questionCount: this.template?.questions.length ?? QUIZ.QUESTION_COUNT,
         roundId: this.state.roundId,
         startingShield: player.shield
       });

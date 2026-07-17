@@ -1,4 +1,4 @@
-import type { CHARACTER_COLOR_IDS, CHARACTER_IDS, ERROR_CODES, PROTOCOL_VERSION, QUIZ } from "./constants.js";
+import type { CHARACTER_COLOR_IDS, CHARACTER_IDS, CURRENT_EVENTS_LOOKBACK_DAYS, ERROR_CODES, PROTOCOL_VERSION, QUIZ_CATEGORIES, QUIZ_CONTENT_MODES, QUIZ_DIFFICULTY_PROFILES } from "./constants.js";
 
 export type ProtocolVersion = typeof PROTOCOL_VERSION;
 export type RoomId = string;
@@ -20,8 +20,13 @@ export type RoomPhase =
   | "results";
 
 export type LocalizationState = "not_started" | "searching" | "localized" | "lost";
-export type QuizStatus = "unconfigured" | "ready" | "question" | "reveal" | "completed";
+export type QuizStatus = "unconfigured" | "configured" | "generating" | "awaiting_approval" | "ready" | "fallback_ready" | "question" | "reveal" | "completed";
 export type QuizDifficulty = "basic" | "intermediate" | "difficult";
+export type QuizContentMode = typeof QUIZ_CONTENT_MODES[number];
+export type QuizCategory = typeof QUIZ_CATEGORIES[number];
+export type QuizDifficultyProfile = typeof QUIZ_DIFFICULTY_PROFILES[number];
+export type CurrentEventsLookbackDays = typeof CURRENT_EVENTS_LOOKBACK_DAYS[number];
+export type QuizTemplateSource = "generated" | "fallback";
 export type BattleStatus = "not_started" | "countdown" | "active" | "completed";
 
 export interface ArenaPosition {
@@ -60,8 +65,22 @@ export interface PublicQuizQuestion {
 }
 
 export interface QuizTemplate {
-  readonly id: typeof QUIZ.TEMPLATE_ID;
+  readonly id: string;
   readonly questions: readonly QuizQuestion[];
+}
+
+export interface QuizConfiguration {
+  readonly category: QuizCategory;
+  readonly contentMode: QuizContentMode;
+  readonly currentEventsLookbackDays: CurrentEventsLookbackDays;
+  readonly difficultyProfile: QuizDifficultyProfile;
+}
+
+export interface QuizEvidenceSource {
+  readonly publishedAt?: string;
+  readonly publisher: string;
+  readonly title: string;
+  readonly url: string;
 }
 
 export interface Standing {

@@ -1,14 +1,15 @@
 import { QUIZ } from "./constants.js";
 import type { PublicQuizQuestion, QuizQuestion, QuizTemplate } from "./types.js";
 
-const optionIds = ["a", "b", "c", "d"] as const;
+const OPTION_IDS = ["a", "b", "c", "d"] as const;
+const TEMPLATE_ID_PATTERN = /^(?:fallback|generated):[a-zA-Z0-9][a-zA-Z0-9._:-]*$/u;
 
 function question(
   order: number,
   difficulty: QuizQuestion["difficulty"],
   prompt: string,
   labels: readonly [string, string, string, string],
-  answerOptionId: (typeof optionIds)[number],
+  answerOptionId: (typeof OPTION_IDS)[number],
   explanation: string
 ): QuizQuestion {
   return {
@@ -16,52 +17,89 @@ function question(
     difficulty,
     durationMs: difficulty === "difficult" ? QUIZ.DIFFICULT_QUESTION_MS : QUIZ.BASIC_QUESTION_MS,
     explanation,
-    id: `pf-${String(order).padStart(2, "0")}`,
-    options: optionIds.map((id, index) => ({ id, label: labels[index] })),
+    id: `gk-${String(order).padStart(2, "0")}`,
+    options: OPTION_IDS.map((id, index) => ({ id, label: labels[index] })),
     order,
     prompt
   };
 }
 
-export const PROGRAMMING_FUNDAMENTALS_V1: QuizTemplate = {
-  id: QUIZ.TEMPLATE_ID,
+export const GENERAL_KNOWLEDGE_FALLBACK_V1: QuizTemplate = {
+  id: QUIZ.FALLBACK_TEMPLATE_ID,
   questions: [
-    question(1, "basic", "let x = 3; x = x + 2; What is x?", ["3", "5", "6", "error"], "b", "The assignment replaces the old value with 3 + 2."),
-    question(2, "basic", "What is the type of true?", ["string", "number", "boolean", "object"], "c", "true and false are boolean values."),
-    question(3, "basic", "What does if (7 > 10) { \"A\" } else { \"B\" } select?", ["A", "B", "both", "neither"], "b", "7 > 10 is false, so the else branch runs."),
-    question(4, "basic", "How many times does for (let i = 0; i < 4; i++) run?", ["3", "4", "5", "infinitely"], "b", "It runs for i = 0, 1, 2, 3."),
-    question(5, "basic", "function triple(n) { return n * 3; } What is triple(4)?", ["7", "12", "16", "undefined"], "b", "The function returns its input multiplied by three."),
-    question(6, "intermediate", "Given const a = [10, 20, 30], what is a[1]?", ["10", "20", "30", "undefined"], "b", "Array indexes begin at zero."),
-    question(7, "intermediate", "const user = { name: \"Ada\", level: 1 }; user.level = 2; What is user.name?", ["Ada", "1", "2", "undefined"], "a", "Updating one property does not change another."),
-    question(8, "difficult", "const a = { score: 1 }; const b = a; b.score = 4; What is a.score?", ["1", "4", "undefined", "error"], "b", "Both variables refer to the same object."),
-    question(9, "difficult", "A loop runs n times and contains another loop that also runs n times. What is the usual time complexity?", ["O(1)", "O(n)", "O(n log n)", "O(n²)"], "d", "The body executes roughly n × n times."),
-    question(10, "difficult", "What must be true before using binary search correctly?", ["list is sorted", "no duplicates", "all numbers", "exactly 10 items"], "a", "Binary search discards half based on ordering.")
+    question(1, "basic", "Which is the largest ocean on Earth?", ["Pacific Ocean", "Atlantic Ocean", "Indian Ocean", "Arctic Ocean"], "a", "The Pacific Ocean covers more area than any other ocean."),
+    question(2, "basic", "Which gas do plants absorb from the atmosphere during photosynthesis?", ["Oxygen", "Nitrogen", "Carbon dioxide", "Helium"], "c", "Plants use carbon dioxide, water, and light energy during photosynthesis."),
+    question(3, "basic", "What is the capital city of Japan?", ["Kyoto", "Tokyo", "Osaka", "Sapporo"], "b", "Tokyo is the capital and largest metropolitan area of Japan."),
+    question(4, "basic", "Who wrote the novel Pride and Prejudice?", ["Jane Austen", "Mary Shelley", "George Eliot", "Virginia Woolf"], "a", "Jane Austen published Pride and Prejudice in 1813."),
+    question(5, "intermediate", "Which river was central to the development of ancient Egyptian civilization?", ["Amazon", "Danube", "Nile", "Yangtze"], "c", "The Nile supplied water and fertile soil that supported ancient Egyptian settlements."),
+    question(6, "intermediate", "What is the chemical symbol for gold?", ["Ag", "Au", "Gd", "Go"], "b", "Gold uses the symbol Au, derived from the Latin word aurum."),
+    question(7, "intermediate", "Which country is home to the historic site of Machu Picchu?", ["Mexico", "Peru", "Chile", "Bolivia"], "b", "Machu Picchu is an Inca site in present-day Peru."),
+    question(8, "difficult", "Which element has atomic number 1?", ["Helium", "Hydrogen", "Lithium", "Oxygen"], "b", "Hydrogen has one proton and is the first element in the periodic table."),
+    question(9, "difficult", "Which planet is the largest in our Solar System?", ["Saturn", "Neptune", "Earth", "Jupiter"], "d", "Jupiter has the greatest mass and diameter of any planet in the Solar System."),
+    question(10, "difficult", "Which is the longest continental mountain range on Earth?", ["Himalayas", "Rocky Mountains", "Andes", "Alps"], "c", "The Andes extend along the western edge of South America for roughly 7,000 kilometres.")
   ]
 };
 
 export type QuizTemplateValidation = { readonly ok: true } | { readonly ok: false; readonly reason: string };
 
+function normalized(value: string): string {
+  return value.normalize("NFKC").trim().replace(/\s+/gu, " ").toLocaleLowerCase("en");
+}
+
+function semanticNormalized(value: string): string {
+  return normalized(value).replace(/[\p{P}\p{S}]/gu, "").replace(/\s+/gu, " ").trim();
+}
+
+function hasBoundedText(value: string, maximum: number, minimum = 1): boolean {
+  const length = [...value.normalize("NFKC").trim()].length;
+  return length >= minimum && length <= maximum && !/[\p{Cc}\p{Cf}]/u.test(value);
+}
+
 export function validateQuizTemplate(template: QuizTemplate): QuizTemplateValidation {
-  if (template.id !== QUIZ.TEMPLATE_ID || template.questions.length !== QUIZ.QUESTION_COUNT) {
-    return { ok: false, reason: "template must contain the approved ten questions" };
+  if (!TEMPLATE_ID_PATTERN.test(template.id) || template.id.length > QUIZ.TEMPLATE_ID_MAX_LENGTH) {
+    return { ok: false, reason: "template ID must be a bounded server-generated identifier" };
+  }
+  if (template.questions.length !== QUIZ.QUESTION_COUNT) {
+    return { ok: false, reason: "template must contain exactly ten questions" };
   }
 
-  const ids = new Set<string>();
+  const questionIds = new Set<string>();
+  const prompts = new Set<string>();
+  let difficultQuestions = 0;
   for (const [index, quizQuestion] of template.questions.entries()) {
-    if (ids.has(quizQuestion.id) || quizQuestion.order !== index + 1) {
+    if (!hasBoundedText(quizQuestion.id, 64) || questionIds.has(quizQuestion.id) || quizQuestion.order !== index + 1) {
       return { ok: false, reason: "question IDs and order must be unique and sequential" };
     }
-    ids.add(quizQuestion.id);
+    questionIds.add(quizQuestion.id);
+
+    if (!hasBoundedText(quizQuestion.prompt, QUIZ.PROMPT_MAX_LENGTH, 8) || prompts.has(normalized(quizQuestion.prompt))) {
+      return { ok: false, reason: "question prompts must be bounded and distinct" };
+    }
+    prompts.add(normalized(quizQuestion.prompt));
+    if (!hasBoundedText(quizQuestion.explanation, QUIZ.EXPLANATION_MAX_LENGTH, 8)) {
+      return { ok: false, reason: "question explanations must be bounded" };
+    }
 
     const expectedDuration = quizQuestion.difficulty === "difficult" ? QUIZ.DIFFICULT_QUESTION_MS : QUIZ.BASIC_QUESTION_MS;
-    if (quizQuestion.options.length !== 4 || quizQuestion.durationMs !== expectedDuration) {
+    if (quizQuestion.options.length !== OPTION_IDS.length || quizQuestion.durationMs !== expectedDuration) {
       return { ok: false, reason: "questions must have four options and their approved duration" };
     }
-    const idsForQuestion = new Set(quizQuestion.options.map((option) => option.id));
-    if (idsForQuestion.size !== 4 || !idsForQuestion.has(quizQuestion.answerOptionId)) {
-      return { ok: false, reason: "questions must have distinct options and a valid answer" };
+    if (quizQuestion.difficulty === "difficult") difficultQuestions += 1;
+
+    const optionIdSet = new Set(quizQuestion.options.map((option) => option.id));
+    if (OPTION_IDS.some((id) => !optionIdSet.has(id)) || !optionIdSet.has(quizQuestion.answerOptionId)) {
+      return { ok: false, reason: "questions must use four canonical options and a valid answer" };
+    }
+    if (quizQuestion.options.some((option) => !hasBoundedText(option.label, QUIZ.OPTION_LABEL_MAX_LENGTH))) {
+      return { ok: false, reason: "question option labels must be bounded" };
+    }
+    const labels = new Set(quizQuestion.options.map((option) => semanticNormalized(option.label)));
+    if (labels.size !== OPTION_IDS.length) {
+      return { ok: false, reason: "question option labels must be distinct" };
     }
   }
+
+  if (difficultQuestions !== 3) return { ok: false, reason: "template must contain exactly three difficult questions" };
   return { ok: true };
 }
 

@@ -27,8 +27,12 @@ _Avoid_: Observer, spectator
 ## Quiz
 
 **Quiz Template**:
-An immutable, versioned set of questions, options, answer keys, explanations, and time limits. P0 has exactly one published template containing ten questions.
+An immutable, validated set of ten questions, options, answer keys, explanations, evidence, and time limits. A template is either organizer-approved generated content or the curated fallback and is frozen before a Quiz Run.
 _Avoid_: Quiz session, question bank
+
+**Quiz Preparation**:
+The pre-game server process that converts bounded organizer configuration into a validated generated or fallback Quiz Template. It includes generation, web grounding, review, budgets, cancellation, and fallback selection but never runs during a Quiz Run.
+_Avoid_: Live quiz generation, client prompt, question streaming
 
 **Quiz Run**:
 The occurrence of a Quiz Template inside one War Room for a frozen participant cohort.

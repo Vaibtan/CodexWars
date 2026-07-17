@@ -1,6 +1,9 @@
 import { defineRoom, defineServer } from "@colyseus/core";
 import { registerOperationalRoutes, type OperationalApplication } from "./operational.js";
 import { WarRoom } from "./rooms/war-room.js";
+import { serverConfig } from "./config.js";
+import { registerMatchmakingAdmission } from "./matchmaking-admission.js";
+import { productionAdmission } from "./runtime-services.js";
 
 export function createAppConfig() {
   let roomsRegistered = false;
@@ -8,7 +11,10 @@ export function createAppConfig() {
     beforeListen: () => {
       roomsRegistered = true;
     },
-    express: (app: OperationalApplication) => registerOperationalRoutes(app, () => roomsRegistered),
+    express: (app: OperationalApplication) => {
+      registerMatchmakingAdmission(app, productionAdmission, serverConfig.trustProxy);
+      registerOperationalRoutes(app, () => roomsRegistered, serverConfig.generation.capability);
+    },
     rooms: {
       war: defineRoom(WarRoom)
     }

@@ -58,6 +58,7 @@ We began by turning the idea into Markdown documents and prompts, including the 
 - Viro / ARKit / ARCore for AR and 3D rendering
 - GLB character assets
 - Colyseus 0.17 for the authoritative in-memory War Room and session authentication
+- OpenAI Responses API through the server-only Vercel AI SDK adapter for optional quiz preparation
 
 ## Specification map
 
@@ -98,8 +99,14 @@ npm run server
 npm run mobile
 ```
 
-The AR experience uses native modules, so install a development build on the device; Expo Go cannot load the Viro integration. Print the [A4 arena marker](output/pdf/codexwars-arena-marker-a4.pdf) at 100% / Actual size and verify its black square is 180 mm wide. For device setup guidance, see [docs/PLATFORM_TESTING.md](docs/PLATFORM_TESTING.md).
+Expo SDK 54 is an intentional compatibility pin for the currently available Expo Go client on the team's phones. The AR experience itself uses native modules and therefore still requires a development build.
 
-## Submission
+The default test suite validates CodexWars-owned logic without pretending to validate OpenAI. To run the real generation, review, validation, and template-freeze acceptance path, provide `OPENAI_API_KEY` to the server process and run:
 
-Built with Codex for the **OpenAI Codex Hackathon — Gurgaon**.
+```bash
+npm run test:openai-live
+```
+
+The live command fails when the key is absent; it is never reported as a skipped or mocked provider pass.
+
+For AR validation, print the [A4 arena marker](output/pdf/codexwars-arena-marker-a4.pdf) at 100% / Actual size and verify its black square is 180 mm wide. For device setup guidance, see [docs/PLATFORM_TESTING.md](docs/PLATFORM_TESTING.md).

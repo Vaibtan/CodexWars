@@ -30,12 +30,12 @@ describe("War Room matchmaking", () => {
   it("creates and binds an organizer through the matchmaking seam", async () => {
     const adapter = new FakeMatchmakingAdapter();
     const attaching = new WarRoomMatchmaker(adapter).createOrganizer("Teacher");
-    await vi.waitFor(() => expect(adapter.transport.sent).toContainEqual({ payload: { protocolVersion: 1 }, type: "request_session" }));
+    await vi.waitFor(() => expect(adapter.transport.sent).toContainEqual({ payload: { protocolVersion: 2 }, type: "request_session" }));
 
     adapter.transport.emitMessage("session_ready", { playerId: null, role: "organizer" });
     const client = await attaching;
 
-    expect(adapter.createOptions).toEqual({ displayName: "Teacher", protocolVersion: 1 });
+    expect(adapter.createOptions).toEqual({ displayName: "Teacher", protocolVersion: 2 });
     expect(client.session).toEqual({ nickname: "Teacher", playerId: null, role: "organizer", roomId: "0427" });
     await client.dispose();
   });
@@ -48,7 +48,7 @@ describe("War Room matchmaking", () => {
     adapter.transport.emitMessage("session_ready", { playerId: "player-1", role: "participant" });
     const client = await attaching;
 
-    expect(adapter.joinRequest).toEqual({ options: { displayName: "Ada", protocolVersion: 1 }, roomId: "0427" });
+    expect(adapter.joinRequest).toEqual({ options: { displayName: "Ada", protocolVersion: 2 }, roomId: "0427" });
     await client.dispose();
   });
 

@@ -37,19 +37,25 @@ const roomState: PublicRoomState = {
       weaponId: "bolt",
     },
   },
-  protocolVersion: 1,
+  protocolVersion: 2,
   quiz: {
+    category: "mixed",
+    contentMode: "general_knowledge",
+    currentEventsLookbackDays: 14,
+    difficultyProfile: "balanced",
     currentQuestion: { difficulty: "", durationMs: 0, id: "", options: [], order: 0, prompt: "" },
     eligibleCount: 0,
     questionCount: 10,
     questionEndsAt: 0,
     questionIndex: -1,
+    regenerationCount: 0,
     revealEndsAt: 0,
     revealedCorrectOptionId: "",
     revealedExplanation: "",
-    status: "ready",
+    source: "fallback",
+    status: "fallback_ready",
     submittedCount: 0,
-    templateId: "programming-fundamentals-v1",
+    templateId: "fallback:general-knowledge-v1",
   },
   roomId: "0427",
   roundId: 1,
@@ -57,11 +63,37 @@ const roomState: PublicRoomState = {
 };
 
 describe("WarRoomRealtimeClient", () => {
+  it("maps organizer quiz configuration and retains only validated private previews", async () => {
+    const transport = new FakeRealtimeTransport();
+    const attaching = attachWarRoomRealtimeClient({ nickname: "Teacher", role: "organizer", transport });
+    transport.emitMessage("session_ready", { playerId: null, role: "organizer" });
+    const client = await attaching;
+    transport.emitState({ ...roomState, players: {} });
+
+    const sending = client.send({ category: "mixed", contentMode: "mixed", currentEventsLookbackDays: 14, difficultyProfile: "balanced", type: "configure_quiz" });
+    const command = transport.sent.at(-1)!;
+    expect(command).toMatchObject({ payload: { category: "mixed", contentMode: "mixed", currentEventsLookbackDays: 14, difficultyProfile: "balanced", roundId: 1 }, type: "configure_quiz" });
+    const commandId = (command.payload as { commandId: string }).commandId;
+    transport.emitMessage("command_accepted", { command: "configure_quiz", commandId, roundId: 1, serverNow: 1_001 });
+    await sending;
+
+    transport.emitMessage("quiz_prepared", {
+      generatedAt: 1_000,
+      preparationId: "prep-1",
+      questions: [{ difficulty: "basic", durationMs: 30_000, id: "q-01", options: [{ id: "a", label: "A" }, { id: "b", label: "B" }, { id: "c", label: "C" }, { id: "d", label: "D" }], order: 1, prompt: "Which answer is correct?" }],
+      roundId: 1,
+      source: "generated",
+      sources: [{ publisher: "Example", title: "Evidence", url: "https://example.com/evidence" }],
+      templateId: "generated:test"
+    });
+    expect(client.getSnapshot().quizPreview).toMatchObject({ preparationId: "prep-1", source: "generated" });
+  });
+
   it("binds server identity, validates synchronized state, and acknowledges exact commands", async () => {
     const transport = new FakeRealtimeTransport();
     const attaching = attachWarRoomRealtimeClient({ nickname: "Ada", role: "participant", transport });
 
-    expect(transport.sent).toEqual([{ payload: { protocolVersion: 1 }, type: "request_session" }]);
+    expect(transport.sent).toEqual([{ payload: { protocolVersion: 2 }, type: "request_session" }]);
     transport.emitMessage("session_ready", { playerId: "player-1", role: "participant" });
     const client = await attaching;
 

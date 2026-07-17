@@ -1,4 +1,4 @@
-export const PROTOCOL_VERSION = 1 as const;
+export const PROTOCOL_VERSION = 2 as const;
 
 export const CHARACTER_IDS = ["default", "knight", "ninja", "wizard"] as const;
 export const CHARACTER_COLOR_IDS = ["gold", "coral", "aqua", "violet"] as const;
@@ -21,6 +21,10 @@ export const ERROR_CODES = [
   "POSITION_INVALID",
   "POSITION_OUT_OF_BOUNDS",
   "QUESTION_MISMATCH",
+  "QUIZ_APPROVAL_REQUIRED",
+  "QUIZ_CONFIG_INVALID",
+  "QUIZ_GENERATION_IN_PROGRESS",
+  "QUIZ_GENERATION_LIMIT_REACHED",
   "QUIZ_NOT_READY",
   "RATE_LIMITED",
   "ROLE_FORBIDDEN",
@@ -55,10 +59,19 @@ export const BATTLE = {
 export const QUIZ = {
   BASIC_QUESTION_MS: 30_000,
   DIFFICULT_QUESTION_MS: 45_000,
+  EXPLANATION_MAX_LENGTH: 400,
+  FALLBACK_TEMPLATE_ID: "fallback:general-knowledge-v1",
+  OPTION_LABEL_MAX_LENGTH: 120,
+  PROMPT_MAX_LENGTH: 240,
   QUESTION_COUNT: 10,
   REVEAL_MS: 5_000,
-  TEMPLATE_ID: "programming-fundamentals-v1"
+  TEMPLATE_ID_MAX_LENGTH: 80
 } as const;
+
+export const QUIZ_CONTENT_MODES = ["general_knowledge", "current_events", "mixed"] as const;
+export const QUIZ_CATEGORIES = ["mixed", "science", "history", "geography", "culture", "sports"] as const;
+export const QUIZ_DIFFICULTY_PROFILES = ["accessible", "balanced", "challenging"] as const;
+export const CURRENT_EVENTS_LOOKBACK_DAYS = [7, 14, 30] as const;
 
 export const WEAPONS = {
   bolt: {

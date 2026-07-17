@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import type { PlayerPublicState, PublicRoomState } from "@codexwars/shared";
+import type { ClientEventPayloads, PlayerPublicState, PublicRoomState } from "@codexwars/shared";
 import { colors } from "../components/theme";
 import type { WarRoomRealtimeClient } from "../features/warRoom/realtimeClient";
 
@@ -9,16 +9,18 @@ type Props = {
   client: WarRoomRealtimeClient;
   connected: boolean;
   onLeave: () => void;
+  quizPreview: ClientEventPayloads["quiz_prepared"] | null;
   room: PublicRoomState;
 };
 
-export function OrganizerDashboardScreen({ client, connected, onLeave, room }: Props) {
+export function OrganizerDashboardScreen({ client, connected, onLeave, quizPreview, room }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [clock, setClock] = useState(Date.now());
   const players = Object.values(room.players).sort((a, b) => a.playerId.localeCompare(b.playerId));
   const connectedCount = players.filter((player) => player.connected).length;
-  const canStartQuiz = players.length > 0 && connectedCount === players.length;
+  const quizReady = room.quiz.status === "ready" || room.quiz.status === "fallback_ready";
+  const canStartQuiz = quizReady && players.length > 0 && connectedCount === players.length;
   const question = room.quiz.currentQuestion.id ? room.quiz.currentQuestion : null;
 
   useEffect(() => {
@@ -44,8 +46,19 @@ export function OrganizerDashboardScreen({ client, connected, onLeave, room }: P
             <View style={styles.hero}><Text style={styles.kicker}>COMMAND CENTER</Text><Text style={styles.heroTitle}>Organizer <Text style={styles.purple}>Dashboard</Text></Text><Text style={styles.copy}>Share the room code, watch participants arrive, then launch the quiz when everyone is present.</Text></View>
             <View style={styles.codePanel}><View><Text style={styles.label}>LIVE ROOM CODE</Text><Text selectable style={styles.code}>{room.roomId}</Text></View><View style={styles.codeGlyph}><Text style={styles.codeGlyphText}>▦</Text></View></View>
             <MetricRow values={[{ label: "JOINED", value: String(players.length) }, { label: "ONLINE", value: `${connectedCount}/${players.length}` }, { label: "STATUS", value: canStartQuiz ? "Ready" : "Waiting" }]} />
+            <View style={styles.questionPanel}>
+              <Text style={styles.label}>QUIZ PREPARATION</Text>
+              <Text style={styles.question}>{room.quiz.status.replaceAll("_", " ").toUpperCase()}</Text>
+              <Text style={styles.copy}>{room.quiz.status === "unconfigured" ? "Use the balanced general-knowledge preset, then prepare all ten questions before play." : `${room.quiz.contentMode.replaceAll("_", " ")} · ${room.quiz.category} · ${room.quiz.difficultyProfile}`}</Text>
+              {quizPreview ? <View style={styles.preview}>{quizPreview.questions.map((item) => <Text key={item.id} style={styles.previewQuestion}>{item.order}. {item.prompt}</Text>)}</View> : null}
+            </View>
             <ParticipantList mode="lobby" players={players} />
-            <ActionButton disabled={busy || !canStartQuiz} label={busy ? "Starting…" : canStartQuiz ? "Start quiz  ⚡" : "Waiting for an online participant"} onPress={() => void run(() => client.send({ type: "start_quiz" }))} />
+            {room.quiz.status === "unconfigured" ? <ActionButton disabled={busy} label={busy ? "Configuring…" : "Configure balanced quiz"} onPress={() => void run(() => client.send({ category: "mixed", contentMode: "mixed", currentEventsLookbackDays: 14, difficultyProfile: "balanced", type: "configure_quiz" }))} /> : null}
+            {room.quiz.status === "configured" ? <ActionButton disabled={busy} label={busy ? "Preparing…" : "Prepare quiz"} onPress={() => void run(() => client.send({ type: "prepare_quiz" }))} /> : null}
+            {room.quiz.status === "generating" ? <ActionButton disabled={busy} label={busy ? "Cancelling…" : "Cancel preparation"} onPress={() => void run(() => client.send({ type: "cancel_quiz_preparation" }))} /> : null}
+            {room.quiz.status === "awaiting_approval" ? <ActionButton disabled={busy} label={busy ? "Approving…" : "Approve quiz"} onPress={() => void run(() => client.send({ type: "approve_quiz" }))} /> : null}
+            {(room.quiz.status === "awaiting_approval" || quizReady) ? <ActionButton disabled={busy || room.quiz.regenerationCount >= 2} label="Regenerate quiz" onPress={() => void run(() => client.send({ type: "regenerate_quiz" }))} /> : null}
+            {quizReady ? <ActionButton disabled={busy || !canStartQuiz} label={busy ? "Starting…" : canStartQuiz ? "Start quiz  ⚡" : "Waiting for an online participant"} onPress={() => void run(() => client.send({ type: "start_quiz" }))} /> : null}
           </>
         ) : room.phase === "quiz" ? (
           <>
@@ -84,4 +97,5 @@ const styles = StyleSheet.create({
   action: { alignItems: "center", backgroundColor: colors.accent, borderRadius: 13, justifyContent: "center", marginTop: 18, minHeight: 56 }, actionText: { color: colors.ink, fontSize: 15, fontWeight: "900" }, disabled: { opacity: 0.42 }, pressed: { opacity: 0.8 }, error: { color: colors.danger, fontSize: 13, marginTop: 12, textAlign: "center" },
   sectionHeading: { marginBottom: 18, marginTop: 26 }, title: { color: colors.ink, fontSize: 34, fontWeight: "900", letterSpacing: -1, marginTop: 7 }, progress: { flexDirection: "row", flexWrap: "wrap", gap: 7, marginBottom: 17 }, progressDot: { alignItems: "center", backgroundColor: colors.backgroundRaised, borderColor: colors.outline, borderRadius: 12, borderWidth: 1, height: 29, justifyContent: "center", width: 29 }, progressActive: { backgroundColor: colors.accent }, progressDone: { backgroundColor: "rgba(72, 229, 232, 0.16)", borderColor: colors.success }, progressText: { color: colors.ink, fontSize: 10, fontWeight: "900" },
   questionPanel: { backgroundColor: colors.backgroundRaised, borderColor: colors.outline, borderRadius: 16, borderWidth: 1, padding: 17 }, questionTop: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" }, gold: { color: "#FFD166", fontSize: 10, fontWeight: "900", letterSpacing: 0.7 }, timer: { color: colors.success, fontSize: 15, fontWeight: "900" }, question: { color: colors.ink, fontSize: 20, fontWeight: "900", lineHeight: 27, marginBottom: 12, marginTop: 15 }, option: { alignItems: "center", backgroundColor: colors.surface, borderColor: colors.outline, borderRadius: 11, borderWidth: 1, flexDirection: "row", marginTop: 7, minHeight: 50, paddingHorizontal: 10 }, optionCorrect: { backgroundColor: "rgba(72, 229, 232, 0.14)", borderColor: colors.success }, optionKey: { backgroundColor: colors.surfaceStrong, borderRadius: 7, color: colors.ink, fontSize: 11, fontWeight: "900", overflow: "hidden", paddingHorizontal: 9, paddingVertical: 6 }, optionText: { color: colors.ink, flex: 1, fontSize: 14, fontWeight: "700", marginLeft: 10 }, empty: { backgroundColor: colors.backgroundRaised, borderRadius: 16, padding: 18 }, emptyTitle: { color: colors.ink, fontSize: 18, fontWeight: "900" },
+  preview: { borderTopColor: colors.outline, borderTopWidth: 1, gap: 7, marginTop: 14, paddingTop: 12 }, previewQuestion: { color: colors.inkMuted, fontSize: 12, lineHeight: 17 },
 });

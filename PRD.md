@@ -1,6 +1,6 @@
 # CodexWars — Product Requirements Document
 
-**Version:** 2.6
+**Version:** 2.7
 **Status:** Approved product direction — exact implementation contracts live in `BUILD_SPEC.md`, `ARCHITECTURE.md`, `API_AND_REALTIME_SPEC.md`, and `docs/AR_IMPLEMENTATION_SPEC.md`; archived documents are historical only
 **Horizons:** Hackathon demo first → evolve into a real product
 **Primary platforms:** Android and iOS (both required for P0; iOS iterates through EAS cloud development builds and is rehearsed through TestFlight on physical iPhones)
@@ -31,6 +31,7 @@ These decisions were made after researching the July 2026 AR landscape and the h
 | D7 | **Privacy-minimal by design: nickname-only joins, no accounts, no camera upload, no third-party ad/analytics SDKs.** | Classroom tools spread teacher-driven and bottom-up; COPPA applies to under-13 users regardless of who consented. Minimal data collection keeps a single teacher able to run a session with zero IT approval. |
 | D8 | **P0 uses three selectable bundled GLB characters with four approved palettes, basic Bolt, and shield-only quiz rewards.** Character and palette choice are cosmetic and never change collision or Battle Stats. Fireball and free spectator view remain post-P0. | The team already produced a bounded local asset catalog, so cosmetic choice can ship without expanding the authoritative combat model or adding remote asset delivery. |
 | D9 | **P0 tracking loss is local and non-pausing during battle.** Before battle it clears readiness. During battle the locked server position survives, but firing is allowed only while the retained marker anchor produces a fresh tracked or degraded/inertial pose; marker removal, stale pose, or unavailable world tracking disables firing and shows a re-scan prompt. | A global pause is too disruptive for the vertical slice, but firing from a frozen aim direction would be incorrect and unfair. Organizer-controlled pause/recovery policy is P1. |
+| D10 | **The hosted pilot replaces the programming demo quiz with server-prepared general-knowledge, current-events, or mixed quizzes.** GPT-5.4 mini may generate a bounded candidate buffer with web evidence; the server deterministically selects exactly ten independently approved questions before organizer approval, while a curated evergreen fallback gates every round. | Preparation happens before gameplay, all participants receive the same frozen ten-question template, and no provider key or answer authority reaches the client. The fallback preserves the complete game when generation is disabled, unavailable, invalid, or over budget. |
 
 ---
 
@@ -38,7 +39,7 @@ These decisions were made after researching the July 2026 AR landscape and the h
 
 ### Organizer (teacher / workshop facilitator)
 - Creates a room, gets a four-digit code
-- Selects or authors the quiz (MVP: fixed demo quiz)
+- Configures a bounded quiz mode/category/difficulty, reviews the prepared quiz, and approves or regenerates it
 - Prints/places the arena marker and defines the arena
 - Monitors readiness on a top-down minimap
 - Starts the battle; observes server-timed/last-alive completion and final standings
@@ -81,7 +82,7 @@ These decisions were made after researching the July 2026 AR landscape and the h
 
 ### 5.1 Organizer flow
 1. **Create War** → receives a four-digit room code, shows it on screen/projector.
-2. Selects the demo quiz (later: authors or generates one).
+2. Chooses general knowledge, current events, or mixed mode plus an allow-listed category and difficulty profile. The server prepares all ten questions, shows the organizer a private preview with sources, and requires approval before quiz start. If generation is disabled or fails policy/validation, the server selects the curated evergreen fallback.
 3. Places the **arena marker** — the bundled A4 PDF printed at 100% / Actual size with a 180 mm black square — flat on the floor at the arena center. A screen-displayed substitute is not part of P0.
 4. Scans the marker with their own phone to verify it tracks, then sets the arena radius (3–6 m).
 5. Watches the lobby: joins, quiz completion, localization, locked positions on a live minimap.
@@ -90,7 +91,7 @@ These decisions were made after researching the July 2026 AR landscape and the h
 
 ### 5.2 Participant flow
 1. **Join War** → four-digit code + nickname.
-2. Completes the fixed ten-question Programming Fundamentals quiz, sees earned powers.
+2. Completes the same server-frozen ten-question quiz as every other participant and sees earned powers.
 3. Chooses Knight, Ninja, or Wizard and one approved palette; this does not change Battle Stats.
 4. Points the camera at the floor marker until the app localizes ("Arena found!").
 5. Stands anywhere valid in the arena, **Lock My Position** (server validates boundary + spacing), then **Ready**.
@@ -125,7 +126,9 @@ These decisions were made after researching the July 2026 AR landscape and the h
 - Timer expiry: highest remaining HP wins; ties break by quiz score.
 
 ### 6.5 Quiz reward economy
-**P0 (hackathon):** the fixed server-owned `programming-fundamentals-v1` template has ten questions: seven basic/intermediate questions at 30 seconds each, three difficult questions at 45 seconds each, and a five-second server-timed reveal after every question. It uses this deterministic shield-only mapping:
+**Hosted pilot:** the server prepares one immutable ten-question template before gameplay. Content is general knowledge, current events, or a server-defined mixture; seven basic/intermediate questions run for 30 seconds, three difficult questions run for 45 seconds, and every question has a five-second server-timed reveal. Current-events questions cover completed factual events inside the configured lookback window, exclude developing stories, and require at least two independent reputable sources. The organizer receives a private preview and approves the generated candidate. Participants never receive future questions, answer keys, review results, or source-derived answer hints before reveal.
+
+GPT-5.4 mini generation is optional runtime infrastructure, not gameplay authority. The server validates exact structure, option uniqueness, answer/explanation consistency, evidence, recency, classroom safety, and ambiguity before accepting a candidate. Any disabled, timed-out, malformed, unsafe, unsupported, over-budget, or cancelled preparation resolves to a reviewed evergreen general-knowledge fallback. Once approved or selected as fallback, the same template, ordering, answer key, explanations, timing, and scoring are frozen for the entire War Room round. The deterministic shield-only mapping remains:
 
 | Correct answers | Reward |
 |---:|---|
@@ -134,21 +137,6 @@ These decisions were made after researching the July 2026 AR landscape and the h
 | 5–6 | +20 starting shield |
 | 7–8 | +30 starting shield |
 | 9–10 | +40 starting shield |
-
-The versioned P0 template content is:
-
-| # | Tier / time | Question | Options | Correct answer | Reveal explanation |
-|---:|---|---|---|---|---|
-| 1 | Basic / 30 s | `let x = 3; x = x + 2;` What is `x`? | 3; 5; 6; error | 5 | The assignment replaces the old value with `3 + 2`. |
-| 2 | Basic / 30 s | What is the type of `true`? | string; number; boolean; object | boolean | `true` and `false` are boolean values. |
-| 3 | Basic / 30 s | What does `if (7 > 10) { "A" } else { "B" }` select? | A; B; both; neither | B | `7 > 10` is false, so the `else` branch runs. |
-| 4 | Basic / 30 s | How many times does `for (let i = 0; i < 4; i++)` run? | 3; 4; 5; infinitely | 4 | It runs for `i = 0, 1, 2, 3`. |
-| 5 | Basic / 30 s | `function triple(n) { return n * 3; }` What is `triple(4)`? | 7; 12; 16; undefined | 12 | The function returns its input multiplied by three. |
-| 6 | Intermediate / 30 s | Given `const a = [10, 20, 30]`, what is `a[1]`? | 10; 20; 30; undefined | 20 | Array indexes begin at zero. |
-| 7 | Intermediate / 30 s | `const user = { name: "Ada", level: 1 }; user.level = 2;` What is `user.name`? | Ada; 1; 2; undefined | Ada | Updating one property does not change another. |
-| 8 | Difficult / 45 s | `const a = { score: 1 }; const b = a; b.score = 4;` What is `a.score`? | 1; 4; undefined; error | 4 | Both variables refer to the same object. |
-| 9 | Difficult / 45 s | A loop runs `n` times and contains another loop that also runs `n` times. What is the usual time complexity? | O(1); O(n); O(n log n); O(n²) | O(n²) | The body executes roughly `n × n` times. |
-| 10 | Difficult / 45 s | What must be true before using binary search correctly? | list is sorted; no duplicates; all numbers; exactly 10 items | list is sorted | Binary search discards half based on ordering. |
 
 **Product (per D6):** quiz score becomes a **point budget spent on a loadout** (shield / extra charges / one-time abilities), with:
 - a guaranteed minimum kit (floor) and diminishing returns at the top (cap),
@@ -171,7 +159,7 @@ Fireball is a future mechanic and has no P0 state, command, UI control, or dorma
 ### P0 — hackathon vertical slice (nothing else starts until this works end-to-end on one Android phone and one iPhone)
 - **Room/lobby:** create room (4-digit code), join with code + nickname, live participant list, capacity 12, ready states
 - **Platforms:** Android and iOS device builds; the M1 rehearsal includes at least one physical phone of each platform
-- **Quiz:** fixed ten-question Programming Fundamentals template, server-timed sequential answers, scoring, deterministic shield-only reward mapping, completion visible to organizer
+- **Quiz:** server-prepared ten-question general-knowledge/current-events template with private organizer approval, curated offline fallback, server-timed sequential answers, scoring, deterministic shield-only rewards, and completion visible to the organizer
 - **Colocation:** bundled printable marker; marker scan → localization state; circular arena boundary
 - **Positioning:** lock marker-relative X/Z; server validates boundary + spacing; organizer minimap
 - **Battle:** synchronized countdown; crosshair + floor-projected aim; server-authoritative 2D hit testing; basic attack; HP + shield; cooldowns; elimination overlay + live standings; winner; 60 s timer
@@ -184,7 +172,7 @@ Fireball is a future mechanic and has no P0 state, command, UI control, or dorma
 - Tracking-loss pause; organizer force-remove/reset player
 
 ### P2 — product horizon
-- Organizer-authored quizzes; AI-generated questions from workshop notes
+- Organizer-authored quizzes and generation from uploaded workshop notes
 - Loadout economy + catch-up mechanics (D6)
 - Movement warnings (drift detection); teams; tournament heats; multiple arenas
 - Match history, classroom analytics, profiles for organizers (participants stay account-free)
@@ -207,8 +195,8 @@ Participant joins with code + nickname.
 - Joining resolves the four-digit code through Colyseus matchmaking before normal room state/messages begin; `join_room` is not an in-room command.
 - Before the quiz, the organizer may mark a participant quiz-only; quiz-only participants still count toward the 12-participant room limit, do not need AR localization or a position, and never block battle start.
 
-### FR-2a: Run the P0 quiz
-The organizer selects the bundled `programming-fundamentals-v1` template and starts the session. The server presents one question at a time, accepts one answer per participant before the server deadline, reveals the answer and explanation for five seconds, then advances automatically. Correct answers and explanations remain server-private until each question closes.
+### FR-2a: Prepare and run the quiz
+The organizer configures only allow-listed content mode, category, difficulty, and recency values. The server accepts one preparation job per room, bounds regeneration attempts and global spend, validates and reviews the complete candidate, then privately previews generated questions and source links to the organizer. Approval freezes generated content; fallback content is already human-approved. `start_quiz` is unavailable while unconfigured, generating, or awaiting approval. During play the server presents one question at a time, accepts one answer per participant before the deadline, reveals the answer and explanation for five seconds, then advances automatically. Reset cancels stale preparation and requires a new preparation for the next round.
 
 ### FR-3: Localize via marker
 Each client establishes the shared arena origin by recognizing the floor marker.
@@ -249,15 +237,17 @@ Each client establishes the shared arena origin by recognizing the floor marker.
 - Tracking loss surfaces immediately with recovery guidance.
 - Design for hostile school WiFi: tiny message payloads, low send rates, tolerate jitter; organizer-hotspot setup documented as the recommended network.
 - P0 is in-memory: a server-process restart ends the room and every client receives a clear session-ended/rejoin experience; restart recovery is not promised.
+- Missing or failed quiz-generation infrastructure never blocks readiness or a complete round; the server reports fallback-only capability and uses the curated template.
 
 ### Safety
 - Stationary play, 1.5 m default minimum spacing, a 0.75 m marker exclusion radius, and a pre-battle safety notice ("feet planted, rotate only").
 - Fantasy effects only; nothing gun-shaped in UI or marketing.
+- Generated quiz content excludes graphic tragedy, active-conflict detail, discriminatory framing, targeted political persuasion, and facts that may change during the room lifetime.
 
 ### Privacy (D7)
 - No camera frames ever leave the device; no facial recognition; camera purpose explained at permission time.
 - Nickname-only participants, no student accounts, no third-party ads/analytics SDKs, data minimization throughout.
-- Room, quiz, combat, results, and nickname state are in-memory and deleted on room expiry. P0 has no Firebase, database, account, or cloud-persistence dependency. Operational logs redact nicknames; reconnect tokens are random, short-lived, and never synchronized or logged.
+- Room, quiz, evidence, review, combat, results, and nickname state are in-memory and deleted on room expiry. There is no Firebase, database, account, or cloud-persistence dependency. The OpenAI key is server-only. Operational logs redact nicknames, quiz content, answers, sources, coordinates, and credentials; reconnect tokens are random, short-lived, and never synchronized or logged.
 
 ### Accessibility
 - Target lock never communicated by color alone; hits paired with sound/haptics; high-contrast panels and scrims over camera backgrounds; organizer can include someone in the quiz but exclude them from combat.
@@ -285,7 +275,7 @@ Each client establishes the shared arena origin by recognizing the floor marker.
 | Milestone | Contents | Exit criteria |
 |---|---|---|
 | **M0 — Colocation spike** | Expo/Viro builds on one Android and one iPhone; both scan one marker; a test object appears in the same physical spot | Go/conditional/no-go on cross-platform marker quality; no-go blocks AR P0 pending an explicit revised-product decision |
-| **M1 — Hackathon vertical slice (P0)** | Full flow: create → join → quiz → localize → lock → battle → winner, on 3–4 devices including Android and iOS; final iOS rehearsal build distributed through TestFlight | Demo success criteria below, twice in a row |
+| **M1 — Hackathon vertical slice (P0)** | Full flow: create → join → prepare/approve quiz → play quiz → localize → lock → battle → winner, on 3–4 devices including Android and iOS; final iOS rehearsal build distributed through TestFlight | Demo success criteria below, twice in a row; fallback path must also complete |
 | **M2 — Hardening (P1)** | Spectator view, minimap fallback, tracking recovery, organizer moderation, reconnection polish; Fireball only after a separate game/protocol decision | A stranger can run a session from a one-page guide |
 | **M3 — Product (P2)** | Authored quizzes, loadout economy, big-screen spectator view, analytics | First real classroom pilots |
 

@@ -1,6 +1,6 @@
 import { ArraySchema } from "@colyseus/schema";
-import { createHash } from "node:crypto";
-import { Client, Room } from "@colyseus/core";
+import { createHash, randomUUID } from "node:crypto";
+import { Client, Room, type AuthContext } from "@colyseus/core";
 import {
   ARENA,
   applyDamage,
@@ -15,12 +15,11 @@ import {
   normalizeDirection,
   parseCommand,
   POSITION_COMMANDS_PER_SECOND,
-  PROGRAMMING_FUNDAMENTALS_V1,
+  publicQuizQuestion,
   PROTOCOL_VERSION,
   resolveBoltAttack,
   startingShieldForScore,
   standingsFor,
-  validateQuizTemplate,
   validatePosition,
   WEAPONS,
   type CommandName,
@@ -30,9 +29,14 @@ import {
   type ServerEventName,
   type ServerEventPayloads,
   type PlayerId,
+  type QuizConfiguration,
   type Standing,
   type ValidatedCommand
 } from "@codexwars/shared";
+import { serverConfig } from "../config.js";
+import type { AdmissionControl } from "../admission-control.js";
+import { QuizPreparationCancelledError, type PreparedQuiz, type QuizPreparation, type QuizPreparationOutcome, type QuizTelemetry } from "../quiz/index.js";
+import { productionAdmission, productionQuizPreparation, productionQuizTelemetry } from "../runtime-services.js";
 import { BattleState, PlayerState, StandingState, WarRoomState } from "./state.js";
 import { type CommandOutcome, type ParticipantMember, WarRoomMembership } from "./membership.js";
 import { QuizRun } from "./quiz-run.js";
@@ -48,9 +52,14 @@ interface CombatBlocker {
 }
 
 export interface WarRoomDependencies {
+  readonly admission: AdmissionControl;
   readonly createRoomIdAllocator: (presence: PresenceSet) => RoomIdAllocator;
-  readonly log: (entry: RedactedLogEntry) => void;
+  readonly log: (entry: OperationalLogEntry) => void;
   readonly now: () => number;
+  readonly newPreparationId: () => string;
+  readonly quizPreparation: QuizPreparation;
+  readonly quizTelemetry: QuizTelemetry;
+  readonly maxRegenerationsPerRound: number;
   readonly reconnectGraceMs: (configuredGraceMs: number) => number;
 }
 
@@ -62,14 +71,42 @@ export interface RedactedLogEntry {
   readonly roomIdHash: string;
 }
 
+export interface QuizPreparationLogEntry {
+  readonly correlationId: string;
+  readonly durationMs: number;
+  readonly eventType: "quiz_preparation";
+  readonly estimatedTextCostUsd: number;
+  readonly inputTokens: number;
+  readonly model: "gpt-5.4-mini-2026-03-17";
+  readonly outcome: QuizPreparationOutcome;
+  readonly outputTokens: number;
+  readonly promptVersion: "quiz-v1";
+  readonly roomIdHash: string;
+  readonly roundId: number;
+  readonly searchCalls: number;
+  readonly sourceCount: number;
+}
+
+export type OperationalLogEntry = QuizPreparationLogEntry | RedactedLogEntry;
+
 const productionDependencies: WarRoomDependencies = {
+  admission: productionAdmission,
   createRoomIdAllocator: (presence) => new RoomIdAllocator(presence),
   log: (entry) => console.info(JSON.stringify(entry)),
   now: () => Date.now(),
+  newPreparationId: randomUUID,
+  quizPreparation: productionQuizPreparation,
+  quizTelemetry: productionQuizTelemetry,
+  maxRegenerationsPerRound: serverConfig.generation.maxRegenerationsPerRound,
   reconnectGraceMs: (configuredGraceMs) => configuredGraceMs
 };
 
 let dependencies: WarRoomDependencies = productionDependencies;
+let acceptingTraffic = true;
+
+export function beginWarRoomShutdown(): void {
+  acceptingTraffic = false;
+}
 
 export function setWarRoomDependenciesForTest(overrides: Partial<WarRoomDependencies>): () => void {
   const previous = dependencies;
@@ -101,6 +138,10 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
   private membership!: WarRoomMembership;
   private roomIdAllocator: RoomIdAllocator | undefined;
   private quizRun!: QuizRun;
+  private preparedQuiz: PreparedQuiz | undefined;
+  private preparedPreparationId = "";
+  private readonly clientIps = new Map<string, string>();
+  private preparation: { readonly controller: AbortController; readonly id: string; readonly roundId: number; readonly startedAt: number } | undefined;
   private lastSuccessfulActivityAt = 0;
 
   async onCreate(): Promise<void> {
@@ -113,8 +154,6 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
       participantEvent: (playerId, type, payload) => this.sendToPlayer(playerId, type, payload),
       roomEvent: (type, payload) => this.emitEvent(type, payload)
     });
-    const templateValidation = validateQuizTemplate(PROGRAMMING_FUNDAMENTALS_V1);
-    if (!templateValidation.ok) throw new Error(`Invalid P0 quiz template: ${templateValidation.reason}`);
     this.state.serverNow = this.now();
     this.lastSuccessfulActivityAt = this.state.serverNow;
     await this.allocateRoomId();
@@ -126,12 +165,15 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
     this.clock.setInterval(() => this.advanceTimers(), 100);
   }
 
-  onAuth(_client: Client, options: unknown): JoinAuth {
+  onAuth(client: Client, options: unknown, context: AuthContext): JoinAuth {
+    if (!acceptingTraffic) throw new Error("ROOM_NOT_JOINABLE");
     if (!isJoinOptions(options) || options.protocolVersion !== PROTOCOL_VERSION) {
       throw new Error("CLIENT_VERSION_UNSUPPORTED");
     }
     const displayName = normalizeDisplayName(options.displayName);
     if (displayName === undefined) throw new Error("NICKNAME_INVALID");
+    const ip = sourceIp(context);
+    this.clientIps.set(client.sessionId, ip);
     if (this.membership.hasOrganizer && this.state.players.size >= ARENA.MAX_PARTICIPANTS) {
       throw new Error("ROOM_FULL");
     }
@@ -154,7 +196,9 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
   }
 
   onReconnect(client: Client): void {
-    if (this.membership.reconnect(client.sessionId) !== undefined) this.touch();
+    const member = this.membership.reconnect(client.sessionId);
+    if (member !== undefined) this.touch();
+    if (member?.kind === "organizer") this.sendQuizPreview(client);
   }
 
   onLeave(client: Client): void {
@@ -172,6 +216,9 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
   }
 
   async onDispose(): Promise<void> {
+    this.cancelPreparation();
+    this.preparedQuiz = undefined;
+    this.clientIps.clear();
     if (this.codeAllocated) await this.roomIdAllocator?.release(this.roomId);
   }
 
@@ -180,6 +227,11 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
     this.state.serverNow = now;
     if (now - this.lastSuccessfulActivityAt >= BATTLE.IDLE_EXPIRY_MS) this.disconnect();
     if (!isPublicRoomStateProjection(this.state.toJSON())) throw new TypeError("Invalid public room state projection");
+  }
+
+  onBeforeShutdown(): void {
+    this.cancelPreparation();
+    this.disconnect();
   }
 
   private now(): number {
@@ -247,6 +299,7 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
     const member = this.membership.memberForSession(client.sessionId);
     if (member?.kind === "organizer") {
       this.sendClientEvent(client, "session_ready", { playerId: null, role: "organizer" });
+      this.sendQuizPreview(client);
       return;
     }
     if (member?.kind !== "participant") {
@@ -266,8 +319,16 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
         return this.setCombatIncluded(client, command);
       case "configure_arena":
         return this.configureArena(client, command);
-      case "select_quiz_template":
-        return this.selectTemplate(client);
+      case "configure_quiz":
+        return this.configureQuiz(client, command);
+      case "prepare_quiz":
+        return this.prepareQuiz(client, command, false);
+      case "regenerate_quiz":
+        return this.prepareQuiz(client, command, true);
+      case "cancel_quiz_preparation":
+        return this.cancelQuizPreparation(client, command);
+      case "approve_quiz":
+        return this.approveQuiz(client, command);
       case "start_quiz":
         return this.startQuiz(client, now);
       case "start_battle":
@@ -319,14 +380,151 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
     return true;
   }
 
-  private selectTemplate(client: Client): boolean {
-    if (!this.quizRun.selectTemplate()) return this.rejectPhase(client);
+  private startQuiz(client: Client, now: number): boolean {
+    if (this.state.quiz.status === "awaiting_approval") return this.reject(client, "QUIZ_APPROVAL_REQUIRED");
+    if (!this.quizRun.start(now)) return this.reject(client, "QUIZ_NOT_READY");
     return true;
   }
 
-  private startQuiz(client: Client, now: number): boolean {
-    if (!this.quizRun.start(now)) return this.reject(client, "QUIZ_NOT_READY");
+  private configureQuiz(client: Client, command: Extract<ValidatedCommand, { command: "configure_quiz" }>): boolean {
+    if (this.state.phase !== "lobby") return this.rejectPhase(client, command.commandId);
+    if (this.preparation !== undefined) return this.reject(client, "QUIZ_GENERATION_IN_PROGRESS", command.commandId);
+    if (this.state.quiz.status !== "unconfigured" && this.state.quiz.status !== "configured") return this.reject(client, "QUIZ_NOT_READY", command.commandId);
+    const firstConfiguration = this.state.quiz.status === "unconfigured";
+    this.quizRun.discardTemplate();
+    this.preparedQuiz = undefined;
+    this.preparedPreparationId = "";
+    this.state.quiz.templateId = "";
+    this.state.quiz.source = "";
+    this.state.quiz.status = "configured";
+    this.state.quiz.contentMode = command.contentMode;
+    this.state.quiz.category = command.category;
+    this.state.quiz.difficultyProfile = command.difficultyProfile;
+    this.state.quiz.currentEventsLookbackDays = command.currentEventsLookbackDays;
+    if (firstConfiguration) this.state.quiz.regenerationCount = 0;
     return true;
+  }
+
+  private prepareQuiz(client: Client, command: Extract<ValidatedCommand, { command: "prepare_quiz" | "regenerate_quiz" }>, regeneration: boolean): boolean {
+    if (!acceptingTraffic) return this.reject(client, "QUIZ_NOT_READY", command.commandId);
+    if (this.state.phase !== "lobby" || this.state.quiz.status === "unconfigured") return this.reject(client, "QUIZ_NOT_READY", command.commandId);
+    if (this.preparation !== undefined) return this.reject(client, "QUIZ_GENERATION_IN_PROGRESS", command.commandId);
+    if (regeneration && this.state.quiz.regenerationCount >= dependencies.maxRegenerationsPerRound) {
+      return this.reject(client, "QUIZ_GENERATION_LIMIT_REACHED", command.commandId);
+    }
+    if (!regeneration && this.state.quiz.status !== "configured") return this.reject(client, "QUIZ_NOT_READY", command.commandId);
+    if (!dependencies.admission.allow("generation", this.clientIps.get(client.sessionId) ?? "unknown", this.now())) {
+      return this.reject(client, "RATE_LIMITED", command.commandId);
+    }
+
+    this.quizRun.discardTemplate();
+    this.preparedQuiz = undefined;
+    this.preparedPreparationId = "";
+    if (regeneration) this.state.quiz.regenerationCount += 1;
+    const preparation = { controller: new AbortController(), id: dependencies.newPreparationId(), roundId: this.state.roundId, startedAt: this.now() };
+    this.preparation = preparation;
+    this.state.quiz.templateId = "";
+    this.state.quiz.source = "";
+    this.state.quiz.status = "generating";
+    void this.completePreparation(preparation, this.quizConfiguration());
+    return true;
+  }
+
+  private cancelQuizPreparation(client: Client, command: Extract<ValidatedCommand, { command: "cancel_quiz_preparation" }>): boolean {
+    if (this.state.phase !== "lobby" || this.preparation === undefined) return this.rejectPhase(client, command.commandId);
+    this.cancelPreparation();
+    this.state.quiz.status = "configured";
+    return true;
+  }
+
+  private approveQuiz(client: Client, command: Extract<ValidatedCommand, { command: "approve_quiz" }>): boolean {
+    if (this.state.phase !== "lobby" || this.state.quiz.status !== "awaiting_approval" || this.preparedQuiz === undefined) {
+      return this.reject(client, "QUIZ_APPROVAL_REQUIRED", command.commandId);
+    }
+    if (!this.quizRun.freezeTemplate(this.preparedQuiz.template)) return this.reject(client, "QUIZ_NOT_READY", command.commandId);
+    this.state.quiz.status = "ready";
+    return true;
+  }
+
+  private async completePreparation(preparation: NonNullable<WarRoom["preparation"]>, configuration: QuizConfiguration): Promise<void> {
+    try {
+      const prepared = await dependencies.quizPreparation.prepare({ configuration, preparationId: preparation.id, roomId: this.roomId, roundId: preparation.roundId }, preparation.controller.signal);
+      if (this.preparation !== preparation || preparation.roundId !== this.state.roundId || preparation.controller.signal.aborted) return;
+      this.preparation = undefined;
+      this.preparedQuiz = prepared;
+      this.preparedPreparationId = preparation.id;
+      this.recordPreparation(preparation, prepared.source === "generated" ? "generated" : prepared.provenance.fallbackReason ?? "upstream_unavailable", prepared.provenance.usage, prepared.sources.length);
+      this.state.quiz.templateId = prepared.template.id;
+      this.state.quiz.source = prepared.source;
+      if (prepared.source === "fallback") {
+        if (!this.quizRun.freezeTemplate(prepared.template)) throw new TypeError("Validated fallback could not be frozen");
+        this.state.quiz.status = "fallback_ready";
+      } else {
+        this.state.quiz.status = "awaiting_approval";
+      }
+      const organizer = this.organizerClient();
+      if (organizer !== undefined) this.sendQuizPreview(organizer);
+    } catch (error) {
+      if (error instanceof QuizPreparationCancelledError) return;
+      if (this.preparation === preparation) {
+        this.preparation = undefined;
+        this.state.quiz.status = "configured";
+        this.recordPreparation(preparation, "upstream_unavailable", { inputTokens: 0, outputTokens: 0, searchCalls: 0 });
+      }
+    }
+  }
+
+  private quizConfiguration(): QuizConfiguration {
+    const quiz = this.state.quiz;
+    if (quiz.contentMode === "" || quiz.category === "" || quiz.difficultyProfile === "" || quiz.currentEventsLookbackDays === 0) {
+      throw new TypeError("Quiz configuration is incomplete");
+    }
+    return { category: quiz.category, contentMode: quiz.contentMode, currentEventsLookbackDays: quiz.currentEventsLookbackDays, difficultyProfile: quiz.difficultyProfile };
+  }
+
+  private cancelPreparation(): void {
+    const preparation = this.preparation;
+    preparation?.controller.abort();
+    this.preparation = undefined;
+    if (preparation !== undefined) this.recordPreparation(preparation, "cancelled", { inputTokens: 0, outputTokens: 0, searchCalls: 0 });
+  }
+
+  private recordPreparation(preparation: { readonly id: string; readonly roundId: number; readonly startedAt: number }, outcome: QuizPreparationOutcome, usage: { readonly inputTokens: number; readonly outputTokens: number; readonly searchCalls: number }, sourceCount = 0): void {
+    const durationMs = Math.max(0, this.now() - preparation.startedAt);
+    dependencies.quizTelemetry.record({ durationMs, outcome, ...usage });
+    dependencies.log({
+      correlationId: preparation.id,
+      durationMs,
+      eventType: "quiz_preparation",
+      estimatedTextCostUsd: (usage.inputTokens * 0.75 + usage.outputTokens * 4.5) / 1_000_000,
+      inputTokens: usage.inputTokens,
+      model: "gpt-5.4-mini-2026-03-17",
+      outcome,
+      outputTokens: usage.outputTokens,
+      promptVersion: "quiz-v1",
+      roomIdHash: createHash("sha256").update(this.roomId).digest("hex").slice(0, 16),
+      roundId: preparation.roundId,
+      searchCalls: usage.searchCalls,
+      sourceCount
+    });
+  }
+
+  private organizerClient(): Client | undefined {
+    return this.clients.find((candidate) => this.membership.memberForSession(candidate.sessionId)?.kind === "organizer");
+  }
+
+  private sendQuizPreview(client: Client): void {
+    const prepared = this.preparedQuiz;
+    if (prepared === undefined) return;
+    this.sendClientEvent(client, "quiz_prepared", {
+      generatedAt: prepared.provenance.generatedAt,
+      preparationId: this.preparedPreparationId,
+      questions: prepared.template.questions.map(publicQuizQuestion),
+      roundId: this.state.roundId,
+      source: prepared.source,
+      sources: prepared.sources,
+      templateId: prepared.template.id
+    });
   }
 
   private submitQuizAnswer(client: Client, actor: ParticipantMember, command: Extract<ValidatedCommand, { command: "quiz_answer" }>, now: number): boolean {
@@ -463,6 +661,9 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
     this.state.roundId += 1;
     this.state.eventSequence = 0;
     this.state.phase = "lobby";
+    this.cancelPreparation();
+    this.preparedQuiz = undefined;
+    this.preparedPreparationId = "";
     this.quizRun.reset();
     this.state.battle = new BattleState();
     this.membership.clearCommandOutcomes();
@@ -655,10 +856,19 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
     this.sendClientEvent(client, "server_error", {
       code,
       message: code.replace(/_/gu, " ").toLowerCase(),
-      retryable: code === "RATE_LIMITED" || code === "ATTACK_COOLDOWN" || code === "BATTLE_START_BLOCKED",
+      retryable: code === "RATE_LIMITED" || code === "ATTACK_COOLDOWN" || code === "BATTLE_START_BLOCKED" || code === "QUIZ_GENERATION_IN_PROGRESS" || code === "QUIZ_APPROVAL_REQUIRED" || code === "QUIZ_NOT_READY" || code === "NOT_LOCALIZED",
       roundId: this.state.roundId,
       ...(commandId === undefined ? {} : { commandId }),
       ...(details === undefined ? {} : { details })
     });
   }
+}
+
+function sourceIp(context: AuthContext): string {
+  if (!serverConfig.trustProxy) {
+    const remoteAddress = context.req?.socket?.remoteAddress;
+    return typeof remoteAddress === "string" && remoteAddress.length > 0 ? remoteAddress : "unknown";
+  }
+  const candidate = Array.isArray(context.ip) ? context.ip[0] : context.ip;
+  return typeof candidate === "string" && candidate.length > 0 ? candidate.split(",", 1)[0]!.trim() : "unknown";
 }

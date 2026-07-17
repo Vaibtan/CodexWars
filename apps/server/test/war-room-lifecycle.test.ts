@@ -32,6 +32,7 @@ describe("War Room lifecycle", () => {
       const playerId = [...harness.room.state.players.keys()][0]!;
       const eliminatedEvents: unknown[] = [];
       harness.organizer.onMessage("player_eliminated", (event) => eliminatedEvents.push(event));
+      await harness.prepareQuiz();
       await harness.sendAndPatch(harness.organizer, "start_quiz", harness.command());
 
       await harness.disconnectUnexpectedly(participant);
@@ -105,7 +106,7 @@ describe("War Room lifecycle", () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
 
       expect(configuredGrace).toEqual([60_000]);
-      await expect(colyseus.sdk.joinById(roomId, { displayName: "Ada", protocolVersion: 1 })).rejects.toThrow(/not found|disposed/iu);
+      await expect(colyseus.sdk.joinById(roomId, { displayName: "Ada", protocolVersion: 2 })).rejects.toThrow(/not found|disposed/iu);
     } finally {
       restoreDependencies();
     }
@@ -156,7 +157,7 @@ describe("War Room lifecycle", () => {
       now += 1;
       await new Promise((resolve) => setTimeout(resolve, 150));
 
-      await expect(colyseus.sdk.joinById(roomId, { displayName: "Ada", protocolVersion: 1 })).rejects.toThrow(/not found|disposed/iu);
+      await expect(colyseus.sdk.joinById(roomId, { displayName: "Ada", protocolVersion: 2 })).rejects.toThrow(/not found|disposed/iu);
     } finally {
       restoreDependencies();
     }

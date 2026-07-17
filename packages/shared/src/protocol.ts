@@ -1,5 +1,5 @@
-import { CHARACTER_COLOR_IDS, CHARACTER_IDS, ERROR_CODES, MAX_COMMAND_BYTES, PROTOCOL_VERSION } from "./constants.js";
-import type { BattleStatus, CharacterColorId, CharacterId, CommandId, ErrorCode, LocalizationState, PlayerId, ProtocolVersion, PublicQuizQuestion, QuizStatus, RoomId, RoomPhase, RoundId, Standing } from "./types.js";
+import { CHARACTER_COLOR_IDS, CHARACTER_IDS, CURRENT_EVENTS_LOOKBACK_DAYS, ERROR_CODES, MAX_COMMAND_BYTES, PROTOCOL_VERSION, QUIZ_CATEGORIES, QUIZ_CONTENT_MODES, QUIZ_DIFFICULTY_PROFILES } from "./constants.js";
+import type { BattleStatus, CharacterColorId, CharacterId, CommandId, CurrentEventsLookbackDays, ErrorCode, LocalizationState, PlayerId, ProtocolVersion, PublicQuizQuestion, QuizCategory, QuizContentMode, QuizDifficultyProfile, QuizEvidenceSource, QuizStatus, QuizTemplateSource, RoomId, RoomPhase, RoundId, Standing } from "./types.js";
 
 export interface CommandMeta {
   readonly commandId: CommandId;
@@ -7,15 +7,19 @@ export interface CommandMeta {
 }
 
 export const COMMAND_NAMES = [
+  "approve_quiz",
   "attack",
+  "cancel_quiz_preparation",
   "configure_arena",
+  "configure_quiz",
   "localization_changed",
   "lock_position",
+  "prepare_quiz",
   "quiz_answer",
   "ready_changed",
+  "regenerate_quiz",
   "reset_round",
   "select_character",
-  "select_quiz_template",
   "set_combat_included",
   "start_battle",
   "start_quiz",
@@ -25,15 +29,19 @@ export const COMMAND_NAMES = [
 export type CommandName = typeof COMMAND_NAMES[number];
 
 export interface CommandPayloads {
+  readonly approve_quiz: Readonly<Record<never, never>>;
   readonly attack: { readonly dirX: number; readonly dirZ: number; readonly predictedTargetId?: PlayerId; readonly weaponId: "bolt" };
+  readonly cancel_quiz_preparation: Readonly<Record<never, never>>;
   readonly configure_arena: { readonly radiusM: number };
+  readonly configure_quiz: { readonly category: QuizCategory; readonly contentMode: QuizContentMode; readonly currentEventsLookbackDays: CurrentEventsLookbackDays; readonly difficultyProfile: QuizDifficultyProfile };
   readonly localization_changed: { readonly state: "searching" | "localized" | "lost" };
   readonly lock_position: { readonly x: number; readonly z: number };
+  readonly prepare_quiz: Readonly<Record<never, never>>;
   readonly quiz_answer: { readonly optionId: string; readonly questionId: string };
   readonly ready_changed: { readonly ready: boolean };
+  readonly regenerate_quiz: Readonly<Record<never, never>>;
   readonly reset_round: Readonly<Record<never, never>>;
   readonly select_character: { readonly characterId: CharacterId; readonly colorId: CharacterColorId };
-  readonly select_quiz_template: { readonly templateId: "programming-fundamentals-v1" };
   readonly set_combat_included: { readonly included: boolean; readonly playerId: PlayerId };
   readonly start_battle: Readonly<Record<never, never>>;
   readonly start_quiz: Readonly<Record<never, never>>;
@@ -44,7 +52,7 @@ export type CommandPayload<Name extends CommandName = CommandName> = CommandMeta
 export type CommandEnvelope = { [Name in CommandName]: { readonly name: Name; readonly payload: CommandPayload<Name> } }[CommandName];
 export type ValidatedCommand = { [Name in CommandName]: CommandPayload<Name> & { readonly command: Name } }[CommandName];
 
-const ORGANIZER_COMMAND_NAMES: ReadonlySet<CommandName> = new Set(["configure_arena", "reset_round", "select_quiz_template", "set_combat_included", "start_battle", "start_quiz"]);
+const ORGANIZER_COMMAND_NAMES: ReadonlySet<CommandName> = new Set(["approve_quiz", "cancel_quiz_preparation", "configure_arena", "configure_quiz", "prepare_quiz", "regenerate_quiz", "reset_round", "set_combat_included", "start_battle", "start_quiz"]);
 const POSITION_COMMAND_NAMES: ReadonlySet<CommandName> = new Set(["localization_changed", "lock_position", "ready_changed", "unlock_position"]);
 
 export function isOrganizerCommand(name: CommandName): boolean {
@@ -55,7 +63,7 @@ export function isPositionCommand(name: CommandName): boolean {
   return POSITION_COMMAND_NAMES.has(name);
 }
 
-export type RuntimeParseResult = { readonly ok: true; readonly value: ValidatedCommand } | { readonly code: "RATE_LIMITED" | "POSITION_INVALID" | "WEAPON_INVALID"; readonly ok: false };
+export type RuntimeParseResult = { readonly ok: true; readonly value: ValidatedCommand } | { readonly code: "QUIZ_CONFIG_INVALID" | "RATE_LIMITED" | "POSITION_INVALID" | "WEAPON_INVALID"; readonly ok: false };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -94,10 +102,18 @@ export function parseCommand(name: CommandName, payload: unknown): RuntimeParseR
       return only(["radiusM"]) && finite(payload.radiusM)
         ? { ok: true, value: { ...base, command: name, radiusM: payload.radiusM } }
         : { code: "POSITION_INVALID", ok: false };
-    case "select_quiz_template":
-      return only(["templateId"]) && payload.templateId === "programming-fundamentals-v1"
-        ? { ok: true, value: { ...base, command: name, templateId: payload.templateId } }
-        : { code: "POSITION_INVALID", ok: false };
+    case "configure_quiz":
+      return only(["category", "contentMode", "currentEventsLookbackDays", "difficultyProfile"])
+        && isOneOf(payload.category, QUIZ_CATEGORIES)
+        && isOneOf(payload.contentMode, QUIZ_CONTENT_MODES)
+        && isOneOf(payload.currentEventsLookbackDays, CURRENT_EVENTS_LOOKBACK_DAYS)
+        && isOneOf(payload.difficultyProfile, QUIZ_DIFFICULTY_PROFILES)
+        ? { ok: true, value: { ...base, category: payload.category, command: name, contentMode: payload.contentMode, currentEventsLookbackDays: payload.currentEventsLookbackDays, difficultyProfile: payload.difficultyProfile } }
+        : { code: "QUIZ_CONFIG_INVALID", ok: false };
+    case "approve_quiz":
+    case "cancel_quiz_preparation":
+    case "prepare_quiz":
+    case "regenerate_quiz":
     case "start_quiz":
     case "start_battle":
     case "reset_round":
@@ -164,6 +180,25 @@ function isStanding(value: unknown): value is Standing {
   return isRecord(value) && typeof value.playerId === "string" && typeof value.displayName === "string" && finite(value.rank) && finite(value.hp) && finite(value.shield) && finite(value.correctAnswers) && typeof value.eliminated === "boolean";
 }
 
+function isPublicQuizQuestionProjection(value: unknown): value is PublicQuizQuestion {
+  if (!isRecord(value) || !hasExactKeys(value, ["difficulty", "durationMs", "id", "options", "order", "prompt"]) || !Array.isArray(value.options)) return false;
+  return isOneOf(value.difficulty, ["basic", "intermediate", "difficult"])
+    && finite(value.durationMs)
+    && typeof value.id === "string"
+    && value.options.every((option) => isRecord(option) && hasExactKeys(option, ["id", "label"]) && typeof option.id === "string" && typeof option.label === "string")
+    && Number.isInteger(value.order)
+    && typeof value.prompt === "string";
+}
+
+function isQuizEvidenceSource(value: unknown): value is QuizEvidenceSource {
+  return isRecord(value)
+    && (hasExactKeys(value, ["publisher", "title", "url"]) || hasExactKeys(value, ["publishedAt", "publisher", "title", "url"]))
+    && (value.publishedAt === undefined || typeof value.publishedAt === "string")
+    && typeof value.publisher === "string"
+    && typeof value.title === "string"
+    && typeof value.url === "string";
+}
+
 export function isServerEventPayload<Name extends ServerEventName>(name: Name, value: unknown): value is ServerEventPayloads[Name] {
   if (!isRecord(value)) return false;
   switch (name) {
@@ -187,6 +222,7 @@ export interface PrivateEventPayloads {
   readonly quiz_answer_accepted: { readonly acceptedAt: number; readonly commandId: CommandId; readonly questionId: string; readonly roundId: RoundId };
   readonly quiz_answer_result: { readonly correct: boolean; readonly questionId: string; readonly roundId: RoundId; readonly runningCorrectAnswers: number; readonly selectedOptionId?: string };
   readonly quiz_completed: { readonly correctAnswers: number; readonly questionCount: number; readonly roundId: RoundId; readonly startingShield: number };
+  readonly quiz_prepared: { readonly generatedAt: number; readonly preparationId: string; readonly questions: readonly PublicQuizQuestion[]; readonly roundId: RoundId; readonly source: QuizTemplateSource; readonly sources: readonly QuizEvidenceSource[]; readonly templateId: string };
   readonly session_ready: { readonly playerId: PlayerId | null; readonly role: "organizer" | "participant" };
 }
 
@@ -203,6 +239,17 @@ export function isPrivateEventPayload<Name extends PrivateEventName>(name: Name,
       return (hasExactKeys(value, ["correct", "questionId", "roundId", "runningCorrectAnswers"]) || hasExactKeys(value, ["correct", "questionId", "roundId", "runningCorrectAnswers", "selectedOptionId"])) && isBoolean(value.correct) && typeof value.questionId === "string" && isPositiveInteger(value.roundId) && isNonNegativeInteger(value.runningCorrectAnswers) && (value.selectedOptionId === undefined || typeof value.selectedOptionId === "string");
     case "quiz_completed":
       return hasExactKeys(value, ["correctAnswers", "questionCount", "roundId", "startingShield"]) && isNonNegativeInteger(value.correctAnswers) && isNonNegativeInteger(value.questionCount) && isPositiveInteger(value.roundId) && isNonNegativeInteger(value.startingShield);
+    case "quiz_prepared":
+      return hasExactKeys(value, ["generatedAt", "preparationId", "questions", "roundId", "source", "sources", "templateId"])
+        && finite(value.generatedAt)
+        && typeof value.preparationId === "string"
+        && Array.isArray(value.questions)
+        && value.questions.every(isPublicQuizQuestionProjection)
+        && isPositiveInteger(value.roundId)
+        && isOneOf(value.source, ["generated", "fallback"])
+        && Array.isArray(value.sources)
+        && value.sources.every(isQuizEvidenceSource)
+        && typeof value.templateId === "string";
     case "session_ready":
       return hasExactKeys(value, ["playerId", "role"])
         && ((value.role === "organizer" && value.playerId === null) || (value.role === "participant" && typeof value.playerId === "string"));
@@ -251,8 +298,8 @@ function isPositiveInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 1;
 }
 
-function isOneOf<Value extends string>(value: unknown, values: readonly Value[]): value is Value {
-  return typeof value === "string" && values.some((candidate) => candidate === value);
+function isOneOf<Value extends string | number>(value: unknown, values: readonly Value[]): value is Value {
+  return values.some((candidate) => candidate === value);
 }
 
 export interface OrganizerPublicState {
@@ -293,17 +340,23 @@ export interface ArenaPublicState {
 }
 
 export interface QuizPublicState {
+  readonly category: QuizCategory | "";
+  readonly contentMode: QuizContentMode | "";
   readonly currentQuestion: Omit<PublicQuizQuestion, "difficulty"> & { readonly difficulty: PublicQuizQuestion["difficulty"] | "" };
+  readonly currentEventsLookbackDays: CurrentEventsLookbackDays | 0;
+  readonly difficultyProfile: QuizDifficultyProfile | "";
   readonly eligibleCount: number;
   readonly questionCount: number;
   readonly questionEndsAt: number;
   readonly questionIndex: number;
+  readonly regenerationCount: number;
   readonly revealEndsAt: number;
   readonly revealedCorrectOptionId: string;
   readonly revealedExplanation: string;
-  readonly status: Exclude<QuizStatus, "unconfigured">;
+  readonly source: QuizTemplateSource | "";
+  readonly status: QuizStatus;
   readonly submittedCount: number;
-  readonly templateId: "programming-fundamentals-v1";
+  readonly templateId: string;
 }
 
 export interface BattlePublicState {
@@ -370,25 +423,31 @@ function isArenaProjection(value: unknown): value is ArenaPublicState {
 }
 
 function isQuizProjection(value: unknown): value is QuizPublicState {
-  if (!isRecord(value) || !hasExactKeys(value, ["currentQuestion", "eligibleCount", "questionCount", "questionEndsAt", "questionIndex", "revealEndsAt", "revealedCorrectOptionId", "revealedExplanation", "status", "submittedCount", "templateId"])) return false;
+  if (!isRecord(value) || !hasExactKeys(value, ["category", "contentMode", "currentEventsLookbackDays", "currentQuestion", "difficultyProfile", "eligibleCount", "questionCount", "questionEndsAt", "questionIndex", "regenerationCount", "revealEndsAt", "revealedCorrectOptionId", "revealedExplanation", "source", "status", "submittedCount", "templateId"])) return false;
   const question = value.currentQuestion;
   if (!isRecord(question) || !hasExactKeys(question, ["difficulty", "durationMs", "id", "options", "order", "prompt"]) || !Array.isArray(question.options)) return false;
-  return question.options.every((option) => isRecord(option) && hasExactKeys(option, ["id", "label"]) && typeof option.id === "string" && typeof option.label === "string")
+  return isOneOf(value.category, ["", ...QUIZ_CATEGORIES])
+    && isOneOf(value.contentMode, ["", ...QUIZ_CONTENT_MODES])
+    && isOneOf(value.currentEventsLookbackDays, [0, ...CURRENT_EVENTS_LOOKBACK_DAYS])
+    && question.options.every((option) => isRecord(option) && hasExactKeys(option, ["id", "label"]) && typeof option.id === "string" && typeof option.label === "string")
     && isOneOf(question.difficulty, ["", "basic", "intermediate", "difficult"])
     && finite(question.durationMs)
     && typeof question.id === "string"
     && Number.isInteger(question.order)
     && typeof question.prompt === "string"
+    && isOneOf(value.difficultyProfile, ["", ...QUIZ_DIFFICULTY_PROFILES])
     && isNonNegativeInteger(value.eligibleCount)
     && isNonNegativeInteger(value.questionCount)
     && finite(value.questionEndsAt)
     && Number.isInteger(value.questionIndex)
+    && isNonNegativeInteger(value.regenerationCount)
     && finite(value.revealEndsAt)
     && typeof value.revealedCorrectOptionId === "string"
     && typeof value.revealedExplanation === "string"
-    && isOneOf(value.status, ["ready", "question", "reveal", "completed"])
+    && isOneOf(value.source, ["", "generated", "fallback"])
+    && isOneOf(value.status, ["unconfigured", "configured", "generating", "awaiting_approval", "ready", "fallback_ready", "question", "reveal", "completed"])
     && isNonNegativeInteger(value.submittedCount)
-    && value.templateId === "programming-fundamentals-v1";
+    && typeof value.templateId === "string";
 }
 
 function isBattleProjection(value: unknown): value is BattlePublicState {

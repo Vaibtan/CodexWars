@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { boot, ColyseusTestServer } from "@colyseus/testing";
 import type { Room as ClientRoom } from "@colyseus/sdk";
-import { PROGRAMMING_FUNDAMENTALS_V1 } from "@codexwars/shared";
+import { GENERAL_KNOWLEDGE_FALLBACK_V1 } from "@codexwars/shared";
 import appConfig, { createAppConfig } from "../src/app.config.js";
 import { setWarRoomDependenciesForTest } from "../src/rooms/war-room.js";
 import { WarRoomHarness } from "./support/war-room-harness.js";
@@ -28,8 +28,8 @@ describe("War Room admission", () => {
     const port = (colyseus.server as unknown as { readonly port: number }).port;
     const unknown = await fetch(`http://127.0.0.1:${port}/does-not-exist`);
 
-    expect(health).toMatchObject({ data: { protocolVersion: 1, service: "codexwars-server", status: "ok" }, statusCode: 200 });
-    expect(ready).toMatchObject({ data: { protocolVersion: 1, service: "codexwars-server", status: "ready" }, statusCode: 200 });
+    expect(health).toMatchObject({ data: { protocolVersion: 2, quizGeneration: "fallback_only", service: "codexwars-server", status: "ok" }, statusCode: 200 });
+    expect(ready).toMatchObject({ data: { protocolVersion: 2, quizGeneration: "fallback_only", service: "codexwars-server", status: "ready" }, statusCode: 200 });
     expect(unknown.status).toBe(404);
     await expect(unknown.json()).resolves.toEqual({ code: "NOT_FOUND", message: "Route not found" });
   });
@@ -53,9 +53,9 @@ describe("War Room admission", () => {
     const playerId = [...room.state.players.keys()][0]!;
 
     const organizerIdentity = organizer.waitForMessage("session_ready");
-    organizer.send("request_session", { protocolVersion: 1 });
+    organizer.send("request_session", { protocolVersion: 2 });
     const participantIdentity = participant.waitForMessage("session_ready");
-    participant.send("request_session", { protocolVersion: 1 });
+    participant.send("request_session", { protocolVersion: 2 });
 
     await expect(organizerIdentity).resolves.toEqual({ playerId: null, role: "organizer" });
     await expect(participantIdentity).resolves.toEqual({ playerId, role: "participant" });
@@ -104,6 +104,7 @@ describe("War Room admission", () => {
     const harness = await WarRoomHarness.create(colyseus);
     const participant = await harness.joinParticipant("Ada");
     const playerId = [...harness.room.state.players.keys()][0]!;
+    await harness.prepareQuiz();
     await harness.sendAndPatch(harness.organizer, "start_quiz", harness.command());
 
     await participant.leave();
@@ -175,6 +176,7 @@ describe("War Room admission", () => {
     const harness = await WarRoomHarness.create(colyseus);
     await harness.joinParticipant("Ada");
     const { organizer, room } = harness;
+    await harness.prepareQuiz();
 
     const reconnectionToken = await harness.disconnectUnexpectedly(organizer);
     expect(room.state.organizer.connected).toBe(false);
@@ -193,7 +195,7 @@ describe("War Room admission", () => {
 
     await harness.organizer.leave();
 
-    await expect(colyseus.sdk.joinById(roomId, { displayName: "Ada", protocolVersion: 1 })).rejects.toBeDefined();
+    await expect(colyseus.sdk.joinById(roomId, { displayName: "Ada", protocolVersion: 2 })).rejects.toBeDefined();
   });
 
   it("logs only redacted correlation metadata for rejected traffic", async () => {
@@ -240,10 +242,11 @@ describe("War Room admission", () => {
         organizer.send("set_combat_included", { ...metadata(), included: false, playerId: player.playerId });
       }
       await waitForPatch();
+      await harness.prepareQuiz();
       organizer.send("start_quiz", metadata());
       await waitForPatch();
 
-      for (const [index, question] of PROGRAMMING_FUNDAMENTALS_V1.questions.entries()) {
+      for (const [index, question] of GENERAL_KNOWLEDGE_FALLBACK_V1.questions.entries()) {
         if (index === 0) {
           now = room.state.quiz.questionEndsAt - 1;
           for (const participant of participants.slice(2)) {
@@ -349,8 +352,8 @@ describe("War Room admission", () => {
     let firstServerStopped = false;
     let secondServer: ColyseusTestServer | undefined;
     try {
-      const oldRoom = await firstServer.createRoom("war", { displayName: "Teacher", protocolVersion: 1 });
-      const oldParticipant = await firstServer.connectTo(oldRoom, { displayName: "Ada", protocolVersion: 1 });
+      const oldRoom = await firstServer.createRoom("war", { displayName: "Teacher", protocolVersion: 2 });
+      const oldParticipant = await firstServer.connectTo(oldRoom, { displayName: "Ada", protocolVersion: 2 });
       const oldToken = oldParticipant.reconnectionToken;
       await firstServer.shutdown();
       firstServerStopped = true;
@@ -362,8 +365,8 @@ describe("War Room admission", () => {
       secondServer = new ColyseusTestServer(secondConfig);
       expect((await secondServer.http.get("/health")).statusCode).toBe(200);
       expect((await secondServer.http.get("/ready")).statusCode).toBe(200);
-      const newRoom = await secondServer.createRoom("war", { displayName: "Teacher", protocolVersion: 1 });
-      await expect(secondServer.connectTo(newRoom, { displayName: "Ada", protocolVersion: 1 })).resolves.toBeDefined();
+      const newRoom = await secondServer.createRoom("war", { displayName: "Teacher", protocolVersion: 2 });
+      await expect(secondServer.connectTo(newRoom, { displayName: "Ada", protocolVersion: 2 })).resolves.toBeDefined();
     } finally {
       await secondServer?.shutdown();
       if (!firstServerStopped) await firstServer.shutdown();

@@ -1,27 +1,45 @@
 import { describe, expect, it } from "vitest";
 import {
-  PROGRAMMING_FUNDAMENTALS_V1,
+  GENERAL_KNOWLEDGE_FALLBACK_V1,
   publicQuizQuestion,
   startingShieldForScore,
   validateQuizTemplate,
 } from "../src/index.js";
 
-describe("fixed P0 quiz rules", () => {
-  it("validates the bundled ten-question template and projects a question without its answer", () => {
-    expect(validateQuizTemplate(PROGRAMMING_FUNDAMENTALS_V1)).toEqual({ ok: true });
-    expect(publicQuizQuestion(PROGRAMMING_FUNDAMENTALS_V1.questions[0])).toEqual({
+describe("quiz template rules", () => {
+  it("validates the curated fallback and projects a question without private authority", () => {
+    expect(validateQuizTemplate(GENERAL_KNOWLEDGE_FALLBACK_V1)).toEqual({ ok: true });
+    expect(publicQuizQuestion(GENERAL_KNOWLEDGE_FALLBACK_V1.questions[0])).toEqual({
       difficulty: "basic",
       durationMs: 30_000,
-      id: "pf-01",
+      id: "gk-01",
       options: [
-        { id: "a", label: "3" },
-        { id: "b", label: "5" },
-        { id: "c", label: "6" },
-        { id: "d", label: "error" },
+        { id: "a", label: "Pacific Ocean" },
+        { id: "b", label: "Atlantic Ocean" },
+        { id: "c", label: "Indian Ocean" },
+        { id: "d", label: "Arctic Ocean" },
       ],
       order: 1,
-      prompt: "let x = 3; x = x + 2; What is x?",
+      prompt: "Which is the largest ocean on Earth?",
     });
+  });
+
+  it("accepts opaque generated template IDs and rejects ambiguous option labels", () => {
+    const generated = { ...GENERAL_KNOWLEDGE_FALLBACK_V1, id: "generated:01JZ8V7Y8TQ5B7MT3Y94K6Y8V2" };
+    expect(validateQuizTemplate(generated)).toEqual({ ok: true });
+
+    const first = generated.questions[0]!;
+    const ambiguous = {
+      ...generated,
+      questions: [{ ...first, options: first.options.map((option) => ({ ...option, label: "Same answer" })) }, ...generated.questions.slice(1)],
+    };
+    expect(validateQuizTemplate(ambiguous)).toEqual({ ok: false, reason: "question option labels must be distinct" });
+
+    const punctuationEquivalent = {
+      ...generated,
+      questions: [{ ...first, options: first.options.map((option, index) => index === 1 ? { ...option, label: `${first.options[0]!.label}!` } : option) }, ...generated.questions.slice(1)],
+    };
+    expect(validateQuizTemplate(punctuationEquivalent)).toEqual({ ok: false, reason: "question option labels must be distinct" });
   });
 
   it.each([

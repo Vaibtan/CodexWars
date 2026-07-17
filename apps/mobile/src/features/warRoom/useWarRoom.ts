@@ -6,6 +6,7 @@ const disconnectedState: WarRoomSubscriptionState = {
   connected: false,
   error: null,
   loading: false,
+  quizPreview: null,
   room: null,
 };
 
@@ -22,6 +23,7 @@ export function useWarRoom(client: WarRoomRealtimeClient | null): WarRoomSubscri
         connected: snapshot.connected,
         error: snapshot.error,
         loading: snapshot.loading,
+        quizPreview: snapshot.quizPreview,
         room: snapshot.room,
       });
     });

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { boot, ColyseusTestServer } from "@colyseus/testing";
-import { PROGRAMMING_FUNDAMENTALS_V1 } from "@codexwars/shared";
+import { GENERAL_KNOWLEDGE_FALLBACK_V1 } from "@codexwars/shared";
 import appConfig from "../src/app.config.js";
 import { setWarRoomDependenciesForTest, type WarRoom } from "../src/rooms/war-room.js";
 import { WarRoomHarness } from "./support/war-room-harness.js";
@@ -21,19 +21,19 @@ beforeEach(async () => {
 
 describe("War Room negative paths", () => {
   it("rejects an unsupported protocol version before binding a role", async () => {
-    const room = await colyseus.createRoom<WarRoom>("war", { displayName: "Teacher", protocolVersion: 1 });
+    const room = await colyseus.createRoom<WarRoom>("war", { displayName: "Teacher", protocolVersion: 2 });
 
-    await expect(colyseus.connectTo(room, { displayName: "Teacher", protocolVersion: 2 })).rejects.toThrow("CLIENT_VERSION_UNSUPPORTED");
+    await expect(colyseus.connectTo(room, { displayName: "Teacher", protocolVersion: 1 })).rejects.toThrow("CLIENT_VERSION_UNSUPPORTED");
     expect(room.state.organizer.connected).toBe(false);
     expect(room.state.players.size).toBe(0);
   });
 
   it("rejects control characters and nicknames longer than twenty Unicode characters", async () => {
-    const controlRoom = await colyseus.createRoom<WarRoom>("war", { displayName: "Teacher", protocolVersion: 1 });
-    await expect(colyseus.connectTo(controlRoom, { displayName: "Ada\u0000", protocolVersion: 1 })).rejects.toThrow("NICKNAME_INVALID");
+    const controlRoom = await colyseus.createRoom<WarRoom>("war", { displayName: "Teacher", protocolVersion: 2 });
+    await expect(colyseus.connectTo(controlRoom, { displayName: "Ada\u0000", protocolVersion: 2 })).rejects.toThrow("NICKNAME_INVALID");
 
-    const longRoom = await colyseus.createRoom<WarRoom>("war", { displayName: "Teacher", protocolVersion: 1 });
-    await expect(colyseus.connectTo(longRoom, { displayName: "A".repeat(21), protocolVersion: 1 })).rejects.toThrow("NICKNAME_INVALID");
+    const longRoom = await colyseus.createRoom<WarRoom>("war", { displayName: "Teacher", protocolVersion: 2 });
+    await expect(colyseus.connectTo(longRoom, { displayName: "A".repeat(21), protocolVersion: 2 })).rejects.toThrow("NICKNAME_INVALID");
   });
 
   it("admits twelve participants, suffixes duplicate nicknames, and rejects participant thirteen", async () => {
@@ -48,10 +48,11 @@ describe("War Room negative paths", () => {
   });
 
   it("rejects an unknown room and a room that has left the lobby", async () => {
-    await expect(colyseus.sdk.joinById("missing-room", { displayName: "Ada", protocolVersion: 1 })).rejects.toThrow(/not found/iu);
+    await expect(colyseus.sdk.joinById("missing-room", { displayName: "Ada", protocolVersion: 2 })).rejects.toThrow(/not found/iu);
 
     const harness = await WarRoomHarness.create(colyseus);
     await harness.joinParticipant("Ada");
+    await harness.prepareQuiz();
     await harness.sendAndPatch(harness.organizer, "start_quiz", harness.command());
 
     await expect(harness.joinParticipant("Grace")).rejects.toThrow("ROOM_NOT_JOINABLE");
@@ -143,8 +144,9 @@ describe("War Room negative paths", () => {
     try {
       const harness = await WarRoomHarness.create(colyseus);
       const participant = await harness.joinParticipant("Ada");
+      await harness.prepareQuiz();
       await harness.sendAndPatch(harness.organizer, "start_quiz", harness.command());
-      const question = PROGRAMMING_FUNDAMENTALS_V1.questions[0]!;
+      const question = GENERAL_KNOWLEDGE_FALLBACK_V1.questions[0]!;
 
       await expect(harness.commandError(participant, "quiz_answer", {
         ...harness.command("wrong-question"),
@@ -185,8 +187,9 @@ describe("War Room negative paths", () => {
       const harness = await WarRoomHarness.create(colyseus);
       const participant = await harness.joinParticipant("Ada");
       await harness.joinParticipant("Grace");
+      await harness.prepareQuiz();
       await harness.sendAndPatch(harness.organizer, "start_quiz", harness.command());
-      const question = PROGRAMMING_FUNDAMENTALS_V1.questions[0]!;
+      const question = GENERAL_KNOWLEDGE_FALLBACK_V1.questions[0]!;
       const privateResult = participant.waitForMessage("quiz_answer_result");
       const organizerResults: unknown[] = [];
       harness.organizer.onMessage("quiz_answer_result", (result) => organizerResults.push(result));
@@ -423,9 +426,10 @@ describe("War Room negative paths", () => {
         commandId: reusedCommandId,
         roundId: 1
       });
+      await harness.prepareQuiz();
       await harness.sendAndPatch(harness.organizer, "start_quiz", harness.command());
-      for (const [index, question] of PROGRAMMING_FUNDAMENTALS_V1.questions.entries()) {
-        if (index === PROGRAMMING_FUNDAMENTALS_V1.questions.length - 1) {
+      for (const [index, question] of GENERAL_KNOWLEDGE_FALLBACK_V1.questions.entries()) {
+        if (index === GENERAL_KNOWLEDGE_FALLBACK_V1.questions.length - 1) {
           const accepted = first.waitForMessage("quiz_answer_accepted");
           first.send("quiz_answer", { ...harness.command(), optionId: question.answerOptionId, questionId: question.id });
           await accepted;
@@ -467,7 +471,7 @@ describe("War Room negative paths", () => {
         shield: 0
       });
       expect(harness.room.state.battle).toMatchObject({ completionReason: "", endsAt: 0, startsAt: 0, status: "not_started", winnerId: "" });
-      expect(harness.room.state.quiz).toMatchObject({ questionIndex: -1, status: "ready", submittedCount: 0 });
+      expect(harness.room.state.quiz).toMatchObject({ questionIndex: -1, status: "unconfigured", submittedCount: 0 });
 
       const replayed = first.waitForMessage("command_accepted");
       first.send("select_character", { characterId: "knight", colorId: "aqua", commandId: reusedCommandId, roundId: 2 });
