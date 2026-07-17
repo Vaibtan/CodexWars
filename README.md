@@ -64,7 +64,7 @@ We began by turning the idea into Markdown documents and prompts, including the 
 
 The Expo/Viro mobile clients perform local marker tracking and rendering, while the Colyseus server owns admission, sessions, quiz progression, positioning, combat, reconnect behavior, and results. Shared runtime contracts and pure gameplay rules keep both sides aligned without giving the client authority over game outcomes.
 
-![CodexWars high-level system design](docs/architecture/codexwars-system-design.png)
+![CodexWars high-level system design](docs/architecture/diagram.png)
 
 The editable source is available in [`docs/architecture/codexwars-system-design.excalidraw`](docs/architecture/codexwars-system-design.excalidraw).
 
