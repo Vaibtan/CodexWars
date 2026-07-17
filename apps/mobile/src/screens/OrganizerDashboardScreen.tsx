@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import type { ClientEventPayloads, PlayerPublicState, PublicRoomState } from "@codexwars/shared";
 import { colors } from "../components/theme";
 import type { WarRoomRealtimeClient } from "../features/warRoom/realtimeClient";
+import { useServerClock } from "../features/warRoom/serverClock";
 
 type Props = {
   client: WarRoomRealtimeClient;
@@ -16,17 +17,12 @@ type Props = {
 export function OrganizerDashboardScreen({ client, connected, onLeave, quizPreview, room }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [clock, setClock] = useState(Date.now());
+  const clock = useServerClock(room.serverNow, 500);
   const players = Object.values(room.players).sort((a, b) => a.playerId.localeCompare(b.playerId));
   const connectedCount = players.filter((player) => player.connected).length;
   const quizReady = room.quiz.status === "ready" || room.quiz.status === "fallback_ready";
   const canStartQuiz = quizReady && players.length > 0 && connectedCount === players.length;
   const question = room.quiz.currentQuestion.id ? room.quiz.currentQuestion : null;
-
-  useEffect(() => {
-    const interval = setInterval(() => setClock(Date.now()), 500);
-    return () => clearInterval(interval);
-  }, []);
 
   const run = async (action: () => Promise<unknown>) => {
     setBusy(true); setError(null);
@@ -34,8 +30,7 @@ export function OrganizerDashboardScreen({ client, connected, onLeave, quizPrevi
     finally { setBusy(false); }
   };
 
-  const estimatedServerNow = clock + (room.serverNow - Date.now());
-  const seconds = Math.max(0, Math.ceil((room.quiz.questionEndsAt - estimatedServerNow) / 1_000));
+  const seconds = Math.max(0, Math.ceil((room.quiz.questionEndsAt - clock.serverNow) / 1_000));
 
   return (
     <SafeAreaView edges={["top", "bottom"]} style={styles.safe}>
@@ -53,12 +48,12 @@ export function OrganizerDashboardScreen({ client, connected, onLeave, quizPrevi
               {quizPreview ? <View style={styles.preview}>{quizPreview.questions.map((item) => <Text key={item.id} style={styles.previewQuestion}>{item.order}. {item.prompt}</Text>)}</View> : null}
             </View>
             <ParticipantList mode="lobby" players={players} />
-            {room.quiz.status === "unconfigured" ? <ActionButton disabled={busy} label={busy ? "Configuring…" : "Configure balanced quiz"} onPress={() => void run(() => client.send({ category: "mixed", contentMode: "mixed", currentEventsLookbackDays: 14, difficultyProfile: "balanced", type: "configure_quiz" }))} /> : null}
-            {room.quiz.status === "configured" ? <ActionButton disabled={busy} label={busy ? "Preparing…" : "Prepare quiz"} onPress={() => void run(() => client.send({ type: "prepare_quiz" }))} /> : null}
-            {room.quiz.status === "generating" ? <ActionButton disabled={busy} label={busy ? "Cancelling…" : "Cancel preparation"} onPress={() => void run(() => client.send({ type: "cancel_quiz_preparation" }))} /> : null}
-            {room.quiz.status === "awaiting_approval" ? <ActionButton disabled={busy} label={busy ? "Approving…" : "Approve quiz"} onPress={() => void run(() => client.send({ type: "approve_quiz" }))} /> : null}
-            {(room.quiz.status === "awaiting_approval" || quizReady) ? <ActionButton disabled={busy || room.quiz.regenerationCount >= 2} label="Regenerate quiz" onPress={() => void run(() => client.send({ type: "regenerate_quiz" }))} /> : null}
-            {quizReady ? <ActionButton disabled={busy || !canStartQuiz} label={busy ? "Starting…" : canStartQuiz ? "Start quiz  ⚡" : "Waiting for an online participant"} onPress={() => void run(() => client.send({ type: "start_quiz" }))} /> : null}
+            {room.quiz.status === "unconfigured" ? <ActionButton disabled={busy} label={busy ? "Configuring…" : "Configure balanced quiz"} onPress={() => void run(() => client.send("configure_quiz", { category: "mixed", contentMode: "mixed", currentEventsLookbackDays: 14, difficultyProfile: "balanced" }))} /> : null}
+            {room.quiz.status === "configured" ? <ActionButton disabled={busy} label={busy ? "Preparing…" : "Prepare quiz"} onPress={() => void run(() => client.send("prepare_quiz", {}))} /> : null}
+            {room.quiz.status === "generating" ? <ActionButton disabled={busy} label={busy ? "Cancelling…" : "Cancel preparation"} onPress={() => void run(() => client.send("cancel_quiz_preparation", {}))} /> : null}
+            {room.quiz.status === "awaiting_approval" ? <ActionButton disabled={busy} label={busy ? "Approving…" : "Approve quiz"} onPress={() => void run(() => client.send("approve_quiz", {}))} /> : null}
+            {(room.quiz.status === "awaiting_approval" || quizReady) ? <ActionButton disabled={busy || room.quiz.regenerationCount >= 2} label="Regenerate quiz" onPress={() => void run(() => client.send("regenerate_quiz", {}))} /> : null}
+            {quizReady ? <ActionButton disabled={busy || !canStartQuiz} label={busy ? "Starting…" : canStartQuiz ? "Start quiz  ⚡" : "Waiting for an online participant"} onPress={() => void run(() => client.send("start_quiz", {}))} /> : null}
           </>
         ) : room.phase === "quiz" ? (
           <>

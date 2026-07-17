@@ -8,7 +8,7 @@ import {
   getCharacter,
   getCharacterColor,
 } from "../features/characters/characterCatalog";
-import type { CharacterSelection } from "../features/characters/types";
+import type { CharacterSelection } from "@codexwars/shared";
 
 type CharacterCustomizationScreenProps = {
   onBack: () => void;

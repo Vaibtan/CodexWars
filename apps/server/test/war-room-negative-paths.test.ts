@@ -1,14 +1,15 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { boot, ColyseusTestServer } from "@colyseus/testing";
 import { GENERAL_KNOWLEDGE_FALLBACK_V1 } from "@codexwars/shared";
-import appConfig from "../src/app.config.js";
-import { setWarRoomDependenciesForTest, type WarRoom } from "../src/rooms/war-room.js";
+import { createAppConfig } from "../src/app.config.js";
+import type { WarRoom } from "../src/rooms/war-room.js";
 import { WarRoomHarness } from "./support/war-room-harness.js";
 
 let colyseus: ColyseusTestServer;
+let now = 0;
 
 beforeAll(async () => {
-  colyseus = await boot(appConfig);
+  colyseus = await boot(createAppConfig({ log: () => undefined, now: () => now }));
 });
 
 afterAll(async () => {
@@ -139,9 +140,7 @@ describe("War Room negative paths", () => {
   }, 10_000);
 
   it("rejects invalid, duplicate, and exact-deadline Quiz Run answers with stable codes", async () => {
-    let now = 1_000;
-    const restoreDependencies = setWarRoomDependenciesForTest({ log: () => undefined, now: () => now });
-    try {
+    now = 1_000;
       const harness = await WarRoomHarness.create(colyseus);
       const participant = await harness.joinParticipant("Ada");
       await harness.prepareQuiz();
@@ -175,15 +174,10 @@ describe("War Room negative paths", () => {
         questionId: question.id
       })).resolves.toMatchObject({ code: "ANSWER_LATE" });
       expect(harness.room.state.quiz.submittedCount).toBe(1);
-    } finally {
-      restoreDependencies();
-    }
   });
 
   it("publishes running Quiz Run results only to the answering participant", async () => {
-    let now = 2_000;
-    const restoreDependencies = setWarRoomDependenciesForTest({ log: () => undefined, now: () => now });
-    try {
+    now = 2_000;
       const harness = await WarRoomHarness.create(colyseus);
       const participant = await harness.joinParticipant("Ada");
       await harness.joinParticipant("Grace");
@@ -206,9 +200,6 @@ describe("War Room negative paths", () => {
       const token = await harness.disconnectUnexpectedly(participant);
       const resumed = await harness.reconnect(token);
       expect([...resumed.state.players.values()].map((player) => player.correctAnswers)).toEqual([0, 0]);
-    } finally {
-      restoreDependencies();
-    }
   });
 
   it("accepts exact arena-radius endpoints and rejects values outside 3 to 6 meters", async () => {
@@ -227,9 +218,7 @@ describe("War Room negative paths", () => {
   });
 
   it("returns finite position corrections and supports unlock followed by relock", async () => {
-    let now = 3_000;
-    const restoreDependencies = setWarRoomDependenciesForTest({ log: () => undefined, now: () => now });
-    try {
+    now = 3_000;
       const harness = await WarRoomHarness.create(colyseus);
       const first = await harness.joinParticipant("Ada");
       const second = await harness.joinParticipant("Grace");
@@ -264,15 +253,10 @@ describe("War Room negative paths", () => {
       expect(harness.room.state.players.get(firstPlayerId)).toMatchObject({ positionLocked: false, positionX: 0, positionZ: 0, ready: false });
       await harness.sendAndPatch(first, "lock_position", { ...harness.command(), x: -1, z: 0 });
       expect(harness.room.state.players.get(firstPlayerId)).toMatchObject({ positionLocked: true, positionX: -1, positionZ: 0 });
-    } finally {
-      restoreDependencies();
-    }
   });
 
   it("returns every battle-start blocker and omits quiz-only participants", async () => {
-    let now = 4_000;
-    const restoreDependencies = setWarRoomDependenciesForTest({ log: () => undefined, now: () => now });
-    try {
+    now = 4_000;
       const harness = await WarRoomHarness.create(colyseus);
       const first = await harness.joinParticipant("Ada");
       const second = await harness.joinParticipant("Grace");
@@ -302,15 +286,10 @@ describe("War Room negative paths", () => {
         { playerId: secondPlayerId, reason: "NOT_READY" }
       ]);
       expect(JSON.stringify(blocked.details)).not.toContain(quizOnlyPlayerId);
-    } finally {
-      restoreDependencies();
-    }
   });
 
   it("rejects an unsupported battle weapon with WEAPON_INVALID", async () => {
-    let now = 5_000;
-    const restoreDependencies = setWarRoomDependenciesForTest({ log: () => undefined, now: () => now });
-    try {
+    now = 5_000;
       const harness = await WarRoomHarness.create(colyseus);
       const first = await harness.joinParticipant("Ada");
       const second = await harness.joinParticipant("Grace");
@@ -323,15 +302,10 @@ describe("War Room negative paths", () => {
         dirZ: 0,
         weaponId: "fireball"
       })).resolves.toMatchObject({ code: "WEAPON_INVALID" });
-    } finally {
-      restoreDependencies();
-    }
   });
 
   it("rejects invalid combat states while preserving ordered miss, hit, elimination, and completion events", async () => {
-    let now = 6_000;
-    const restoreDependencies = setWarRoomDependenciesForTest({ log: () => undefined, now: () => now });
-    try {
+    now = 6_000;
       const harness = await WarRoomHarness.create(colyseus);
       const first = await harness.joinParticipant("Ada");
       const second = await harness.joinParticipant("Grace");
@@ -406,15 +380,10 @@ describe("War Room negative paths", () => {
       })).resolves.toMatchObject({ code: "ATTACK_NOT_ALLOWED" });
       expect(orderedEvents.map((event) => event.eventSequence)).toEqual([...orderedEvents.map((event) => event.eventSequence)].sort((left, right) => left - right));
       expect(orderedEvents.at(-1)).toMatchObject({ type: "battle_completed" });
-    } finally {
-      restoreDependencies();
-    }
   }, 10_000);
 
   it("resets every round-scoped field, prunes departed participants, and rejects old-round commands", async () => {
-    let now = 7_000;
-    const restoreDependencies = setWarRoomDependenciesForTest({ log: () => undefined, now: () => now });
-    try {
+    now = 7_000;
       const harness = await WarRoomHarness.create(colyseus);
       const first = await harness.joinParticipant("Ada");
       const second = await harness.joinParticipant("Grace");
@@ -482,8 +451,5 @@ describe("War Room negative paths", () => {
         commandId: "old-round",
         roundId: 1
       })).resolves.toMatchObject({ code: "ROUND_MISMATCH", commandId: "old-round", roundId: 2 });
-    } finally {
-      restoreDependencies();
-    }
   }, 10_000);
 });

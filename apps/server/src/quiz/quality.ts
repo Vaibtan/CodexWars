@@ -1,12 +1,8 @@
-import { QUIZ, publicQuizQuestion, validateQuizTemplate, type QuizConfiguration, type QuizEvidenceSource, type QuizQuestion, type QuizTemplate } from "@codexwars/shared";
+import { QUIZ, validateQuizTemplate, type QuizConfiguration, type QuizEvidenceSource, type QuizQuestion, type QuizTemplate } from "@codexwars/shared";
+import { httpsHostname, trustedEvidenceHostname } from "./evidence-policy.js";
 import type { ModelEvidenceSource, ModelQuizCandidate, ModelQuizReview } from "./types.js";
 
 const OPTION_IDS = ["a", "b", "c", "d"] as const;
-const BLOCKED_SOURCE_DOMAINS = ["facebook.com", "instagram.com", "reddit.com", "tiktok.com", "x.com"] as const;
-export const TRUSTED_SOURCE_DOMAINS = [
-  "apnews.com", "bbc.com", "britannica.com", "fifa.com", "history.com", "nasa.gov", "nationalgeographic.com",
-  "nih.gov", "noaa.gov", "npr.org", "olympics.com", "reuters.com", "si.edu", "un.org", "who.int", "worldbank.org"
-] as const;
 const UNSAFE_TERMS = ["graphic violence", "racial slur", "suicide method", "targeted political persuasion"] as const;
 
 export type CandidateValidation =
@@ -34,19 +30,9 @@ export function materializeGeneratedAnswer(
   return { answerIndex, options };
 }
 
-function hostname(source: ModelEvidenceSource): string | undefined {
-  try {
-    const parsed = new URL(source.url);
-    return parsed.protocol === "https:" ? parsed.hostname.toLocaleLowerCase("en").replace(/^www\./u, "") : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 function sourceAllowed(source: ModelEvidenceSource, currentEvent: boolean, configuration: QuizConfiguration, now: number, cutoffMs: number): boolean {
-  const domain = hostname(source);
-  if (domain === undefined || BLOCKED_SOURCE_DOMAINS.some((blocked) => domain === blocked || domain.endsWith(`.${blocked}`))) return false;
-  if (!TRUSTED_SOURCE_DOMAINS.some((trusted) => domain === trusted || domain.endsWith(`.${trusted}`))) return false;
+  const domain = httpsHostname(source.url);
+  if (domain === undefined || !trustedEvidenceHostname(domain)) return false;
   const titleLength = [...source.title.normalize("NFKC").trim()].length;
   const publisherLength = [...source.publisher.normalize("NFKC").trim()].length;
   if (!Number.isFinite(source.retrievedAt) || source.retrievedAt > now || titleLength === 0 || titleLength > 200 || publisherLength === 0 || publisherLength > 100 || source.url.length > 500) return false;
@@ -60,7 +46,7 @@ function sourceAllowed(source: ModelEvidenceSource, currentEvent: boolean, confi
 function evidenceAllowed(sources: readonly ModelEvidenceSource[], currentEvent: boolean, configuration: QuizConfiguration, now: number, cutoffMs: number): boolean {
   const required = currentEvent ? 2 : 1;
   if (sources.length < required || sources.some((source) => !sourceAllowed(source, currentEvent, configuration, now, cutoffMs))) return false;
-  const domains = new Set(sources.map(hostname));
+  const domains = new Set(sources.map((source) => httpsHostname(source.url)));
   return domains.size >= required;
 }
 
@@ -115,8 +101,7 @@ export function selectPlayableCandidate(
     candidate: { ...candidate, questions: ordered.map(({ question }) => question) },
     review: {
       approved: true,
-      questions: ordered.map(({ review: questionReview }, index) => ({ ...questionReview, order: index + 1 })),
-      ...(review.usage === undefined ? {} : { usage: review.usage })
+      questions: ordered.map(({ review: questionReview }, index) => ({ ...questionReview, order: index + 1 }))
     }
   };
 }
@@ -142,9 +127,12 @@ export function validateGeneratedCandidate(candidate: ModelQuizCandidate, review
   if (configuration.category !== "mixed" && candidate.questions.some((question) => question.category !== configuration.category)) return { ok: false };
   if (candidate.questions.some((question) => !evidenceAllowed(question.sources, question.kind === "current_event", configuration, now, cutoffMs))) return { ok: false };
 
-  const questions = candidate.questions.map((question, index) => questionFromModel(question, index + 1));
-  if (questions.some((question) => question === undefined)) return { ok: false };
-  const template: QuizTemplate = { id: templateId, questions: questions as readonly QuizQuestion[] };
+  const questions = candidate.questions.flatMap((question, index) => {
+    const value = questionFromModel(question, index + 1);
+    return value === undefined ? [] : [value];
+  });
+  if (questions.length !== candidate.questions.length) return { ok: false };
+  const template: QuizTemplate = { id: templateId, questions };
   if (!validateQuizTemplate(template).ok) return { ok: false };
 
   const uniqueSources = new Map<string, QuizEvidenceSource>();
@@ -157,8 +145,4 @@ export function validateGeneratedCandidate(candidate: ModelQuizCandidate, review
     });
   }
   return { ok: true, sources: [...uniqueSources.values()], template };
-}
-
-export function previewQuestions(template: QuizTemplate) {
-  return template.questions.map(publicQuizQuestion);
 }

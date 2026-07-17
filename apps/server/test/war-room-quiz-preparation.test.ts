@@ -1,16 +1,28 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { boot, ColyseusTestServer } from "@colyseus/testing";
 import { GENERAL_KNOWLEDGE_FALLBACK_V1, type QuizTemplate } from "@codexwars/shared";
-import appConfig from "../src/app.config.js";
+import { createAppConfig } from "../src/app.config.js";
 import type { PreparedQuiz, QuizPreparation } from "../src/quiz/index.js";
-import { setWarRoomDependenciesForTest } from "../src/rooms/war-room.js";
 import { WarRoomHarness } from "./support/war-room-harness.js";
 
 let colyseus: ColyseusTestServer;
+let now = 1_000;
+let prepareQuiz: QuizPreparation["prepare"] = async () => generatedQuiz();
 
-beforeAll(async () => { colyseus = await boot(appConfig); });
+beforeAll(async () => {
+  colyseus = await boot(createAppConfig({
+    log: () => undefined,
+    maxRegenerationsPerRound: 1,
+    now: () => now,
+    quizPreparation: { prepare: (request, signal) => prepareQuiz(request, signal) }
+  }));
+});
 afterAll(async () => { await colyseus.shutdown(); });
-beforeEach(async () => { await colyseus.cleanup(); });
+beforeEach(async () => {
+  await colyseus.cleanup();
+  now = 1_000;
+  prepareQuiz = async () => generatedQuiz();
+});
 
 function generatedQuiz(): PreparedQuiz {
   const template: QuizTemplate = { ...GENERAL_KNOWLEDGE_FALLBACK_V1, id: "generated:test-quiz" };
@@ -24,10 +36,8 @@ function generatedQuiz(): PreparedQuiz {
 
 describe("War Room quiz preparation", () => {
   it("keeps generated content organizer-private until approval and then freezes it for play", async () => {
-    let now = 1_000;
     const prepare = vi.fn<QuizPreparation["prepare"]>().mockResolvedValue(generatedQuiz());
-    const restore = setWarRoomDependenciesForTest({ log: () => undefined, now: () => now, quizPreparation: { prepare } });
-    try {
+    prepareQuiz = prepare;
       const harness = await WarRoomHarness.create(colyseus);
       await harness.joinParticipant("Ada");
       const preview = harness.organizer.waitForMessage("quiz_prepared");
@@ -45,16 +55,12 @@ describe("War Room quiz preparation", () => {
       await harness.finishQuiz((value) => { now = value; });
       expect(harness.room.state.phase).toBe("localization");
       expect(prepare).toHaveBeenCalledTimes(1);
-    } finally {
-      restore();
-    }
   });
 
   it("deduplicates requests and ignores a completion after organizer cancellation", async () => {
     let resolve!: (quiz: PreparedQuiz) => void;
     const prepare = vi.fn<QuizPreparation["prepare"]>().mockImplementation(() => new Promise((done) => { resolve = done; }));
-    const restore = setWarRoomDependenciesForTest({ log: () => undefined, quizPreparation: { prepare } });
-    try {
+    prepareQuiz = prepare;
       const harness = await WarRoomHarness.create(colyseus);
       await harness.sendAndPatch(harness.organizer, "configure_quiz", { ...harness.command(), category: "mixed", contentMode: "general_knowledge", currentEventsLookbackDays: 14, difficultyProfile: "balanced" });
       const request = harness.command("prepare");
@@ -65,21 +71,13 @@ describe("War Room quiz preparation", () => {
       resolve(generatedQuiz());
       await Promise.resolve();
       expect(harness.room.state.quiz).toMatchObject({ status: "configured", templateId: "" });
-    } finally {
-      restore();
-    }
   });
 
   it("enforces the per-round regeneration allowance", async () => {
-    const restore = setWarRoomDependenciesForTest({ log: () => undefined, maxRegenerationsPerRound: 1 });
-    try {
       const harness = await WarRoomHarness.create(colyseus);
       await harness.prepareQuiz();
       await harness.sendAndPatch(harness.organizer, "regenerate_quiz", harness.command());
       while (harness.room.state.quiz.status === "generating") await harness.waitForPatch();
       await expect(harness.commandError(harness.organizer, "regenerate_quiz", harness.command())).resolves.toMatchObject({ code: "QUIZ_GENERATION_LIMIT_REACHED" });
-    } finally {
-      restore();
-    }
   });
 });

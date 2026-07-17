@@ -4,17 +4,19 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import {
   WEAPONS,
   resolveBoltAttack,
+  type CharacterSelection,
   type PublicRoomState,
   type WeaponId,
 } from "@codexwars/shared";
 import { AttackButton } from "../ar/AttackButton";
 import { freshAimDirection, type MarkerSpacePose } from "../ar/coordinates";
+import { markerTrackingDecision } from "../ar/markerTrackingPolicy";
 import type { ArMarkerTrackingState, ArTrackingState } from "../ar/types";
 import { BattleStatsPanel } from "../components/BattleStatsPanel";
 import { colors } from "../components/theme";
 import { getCharacter } from "../features/characters/characterCatalog";
-import type { CharacterSelection } from "../features/characters/types";
 import type { WarRoomRealtimeClient } from "../features/warRoom/realtimeClient";
+import { useServerClock } from "../features/warRoom/serverClock";
 
 type ParticipantBattleScreenProps = {
   aimPose: MarkerSpacePose | null;
@@ -28,9 +30,9 @@ type ParticipantBattleScreenProps = {
 
 export function ParticipantBattleScreen({ aimPose, client, markerTracking, onBattleComplete, room, selection, tracking }: ParticipantBattleScreenProps) {
   const [lastAction, setLastAction] = useState("Aim at an opponent");
-  const [clockMs, setClockMs] = useState(Date.now());
+  const clock = useServerClock(room.serverNow, 100);
   const player = client.session.playerId === null ? undefined : room.players[client.session.playerId];
-  const aimDirection = freshAimDirection(aimPose, clockMs);
+  const aimDirection = freshAimDirection(aimPose, clock.localNow);
   const combatants = Object.values(room.players).map((candidate) => ({
     combatIncluded: candidate.combatIncluded,
     connected: candidate.connected,
@@ -53,11 +55,6 @@ export function ParticipantBattleScreen({ aimPose, client, markerTracking, onBat
   const target = predictedTargetId ? room.players[predictedTargetId] : undefined;
 
   useEffect(() => {
-    const interval = setInterval(() => setClockMs(Date.now()), 100);
-    return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
     if (room.phase === "results") onBattleComplete();
   }, [onBattleComplete, room.phase]);
 
@@ -67,14 +64,17 @@ export function ParticipantBattleScreen({ aimPose, client, markerTracking, onBat
       setLastAction(aimPose?.direction === null ? "Hold the phone level to aim" : "Re-scan the marker before firing");
       return;
     }
+    if (!player.positionLocked) {
+      setLastAction("Your locked battle position is not available.");
+      return;
+    }
     setLastAction("Bolt sent…");
     try {
-      if (!player.positionLocked) throw new Error("Your locked battle position is not available.");
-      await client.send({
+      await client.send("attack", {
         dirX: freshDirection.x,
         dirZ: freshDirection.z,
         ...(predictedTargetId === undefined ? {} : { predictedTargetId }),
-        type: "attack",
+        weaponId: "bolt",
       });
       setLastAction(target ? `Bolt fired toward ${target.displayName}.` : "Bolt fired.");
     } catch (error) {
@@ -82,27 +82,18 @@ export function ParticipantBattleScreen({ aimPose, client, markerTracking, onBat
     }
   };
 
-  const trackingLabel = markerTracking === "tracked"
-    ? "Arena marker locked"
-    : markerTracking === "degraded"
-      ? "Using fresh inertial marker pose"
-      : markerTracking === "lost"
-        ? "Marker lost · re-scan"
-        : tracking === "limited"
-          ? "Move slowly · tracking limited"
-          : "Find the arena marker";
-  const estimatedServerNow = clockMs + (room.serverNow - Date.now());
+  const trackingLabel = markerTrackingDecision("battle", markerTracking, tracking).label;
   const boltReady = Boolean(
     player
     && !player.eliminated
     && player.localization !== "lost"
     && tracking !== "unavailable"
     && aimDirection
-    && estimatedServerNow >= player.nextAttackAt
+    && clock.serverNow >= player.nextAttackAt
     && room.phase === "battle",
   );
-  const secondsRemaining = Math.max(0, Math.ceil((room.battle.endsAt - estimatedServerNow) / 1_000));
-  const boltDetail = boltReady ? `${WEAPONS.bolt.damage} damage` : `${(Math.max(0, (player?.nextAttackAt ?? estimatedServerNow) - estimatedServerNow) / 1_000).toFixed(1)}s cooldown`;
+  const secondsRemaining = Math.max(0, Math.ceil((room.battle.endsAt - clock.serverNow) / 1_000));
+  const boltDetail = boltReady ? `${WEAPONS.bolt.damage} damage` : `${(Math.max(0, (player?.nextAttackAt ?? clock.serverNow) - clock.serverNow) / 1_000).toFixed(1)}s cooldown`;
 
   return (
       <SafeAreaView edges={["top", "bottom"]} pointerEvents="box-none" style={styles.overlay}>

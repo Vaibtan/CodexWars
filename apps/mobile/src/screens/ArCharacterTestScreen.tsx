@@ -26,7 +26,7 @@ export function ArCharacterTestScreen({ onDone }: { onDone: () => void }) {
 
   return (
     <View style={styles.screen}>
-      <ParticipantPlacementArView bridge={bridge} selection={TEST_CHARACTER} />
+      <ParticipantPlacementArView bridge={bridge} />
       <SafeAreaView edges={["top", "bottom"]} pointerEvents="box-none" style={styles.overlay}>
         <View pointerEvents="box-none" style={styles.topRow}>
           <Pressable accessibilityLabel="Close AR test" accessibilityRole="button" onPress={onDone} style={styles.closeButton}>

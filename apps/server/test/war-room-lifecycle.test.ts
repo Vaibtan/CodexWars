@@ -1,13 +1,21 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { boot, ColyseusTestServer } from "@colyseus/testing";
-import appConfig from "../src/app.config.js";
-import { setWarRoomDependenciesForTest } from "../src/rooms/war-room.js";
+import { createAppConfig } from "../src/app.config.js";
 import { WarRoomHarness } from "./support/war-room-harness.js";
 
 let colyseus: ColyseusTestServer;
+let configuredGrace: number[] = [];
+let now = 0;
 
 beforeAll(async () => {
-  colyseus = await boot(appConfig);
+  colyseus = await boot(createAppConfig({
+    log: () => undefined,
+    now: () => now,
+    reconnectGraceMs: (graceMs) => {
+      configuredGrace.push(graceMs);
+      return 0;
+    }
+  }));
 });
 
 afterAll(async () => {
@@ -16,17 +24,13 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await colyseus.cleanup();
+  configuredGrace = [];
+  now = 0;
 });
 
 describe("War Room lifecycle", () => {
   it("excludes a participant after pre-battle reconnect expiry without deadlocking phase progression", async () => {
-    let now = 10_000;
-    const restoreDependencies = setWarRoomDependenciesForTest({
-      log: () => undefined,
-      now: () => now,
-      reconnectGraceMs: () => 0
-    });
-    try {
+    now = 10_000;
       const harness = await WarRoomHarness.create(colyseus);
       const participant = await harness.joinParticipant("Ada");
       const playerId = [...harness.room.state.players.keys()][0]!;
@@ -50,19 +54,10 @@ describe("War Room lifecycle", () => {
       await harness.finishQuiz((value) => { now = value; });
       expect(harness.room.state.phase).toBe("positioning");
       expect(harness.room.state.players.get(playerId)).toMatchObject({ correctAnswers: 0, quizCompleted: true });
-    } finally {
-      restoreDependencies();
-    }
   });
 
   it("eliminates a participant exactly once when active-round reconnect grace expires", async () => {
-    let now = 20_000;
-    const restoreDependencies = setWarRoomDependenciesForTest({
-      log: () => undefined,
-      now: () => now,
-      reconnectGraceMs: () => 0
-    });
-    try {
+    now = 20_000;
       const harness = await WarRoomHarness.create(colyseus);
       const first = await harness.joinParticipant("Ada");
       const second = await harness.joinParticipant("Grace");
@@ -84,21 +79,9 @@ describe("War Room lifecycle", () => {
       expect(harness.room.state.phase).toBe("battle");
       expect(eliminatedEvents).toEqual([expect.objectContaining({ eliminatedByPlayerId: null, playerId: departingPlayerId })]);
       expect(harness.room.state.eventSequence).toBe(eventsBeforeDrop + 1);
-    } finally {
-      restoreDependencies();
-    }
   });
 
   it("closes the War Room when the organizer's 60-second pre-battle grace expires", async () => {
-    const configuredGrace: number[] = [];
-    const restoreDependencies = setWarRoomDependenciesForTest({
-      log: () => undefined,
-      reconnectGraceMs: (graceMs) => {
-        configuredGrace.push(graceMs);
-        return 0;
-      }
-    });
-    try {
       const harness = await WarRoomHarness.create(colyseus);
       const roomId = harness.room.roomId;
       harness.organizer.reconnection.enabled = false;
@@ -107,23 +90,10 @@ describe("War Room lifecycle", () => {
 
       expect(configuredGrace).toEqual([60_000]);
       await expect(colyseus.sdk.joinById(roomId, { displayName: "Ada", protocolVersion: 2 })).rejects.toThrow(/not found|disposed/iu);
-    } finally {
-      restoreDependencies();
-    }
   });
 
   it("keeps an active battle running after the organizer's 20-second grace expires", async () => {
-    let now = 30_000;
-    const configuredGrace: number[] = [];
-    const restoreDependencies = setWarRoomDependenciesForTest({
-      log: () => undefined,
-      now: () => now,
-      reconnectGraceMs: (graceMs) => {
-        configuredGrace.push(graceMs);
-        return 0;
-      }
-    });
-    try {
+    now = 30_000;
       const harness = await WarRoomHarness.create(colyseus);
       const first = await harness.joinParticipant("Ada");
       const second = await harness.joinParticipant("Grace");
@@ -139,15 +109,10 @@ describe("War Room lifecycle", () => {
       expect(harness.room.state.phase).toBe("battle");
       expect(harness.room.state.battle.endsAt).toBe(endsAt);
       expect(harness.room.state.eventSequence).toBe(eventsBeforeDrop + 1);
-    } finally {
-      restoreDependencies();
-    }
   });
 
   it("expires a War Room at exactly two hours without successful activity", async () => {
-    let now = 40_000;
-    const restoreDependencies = setWarRoomDependenciesForTest({ log: () => undefined, now: () => now });
-    try {
+    now = 40_000;
       const harness = await WarRoomHarness.create(colyseus);
       const roomId = harness.room.roomId;
       now += 7_200_000 - 1;
@@ -158,8 +123,5 @@ describe("War Room lifecycle", () => {
       await new Promise((resolve) => setTimeout(resolve, 150));
 
       await expect(colyseus.sdk.joinById(roomId, { displayName: "Ada", protocolVersion: 2 })).rejects.toThrow(/not found|disposed/iu);
-    } finally {
-      restoreDependencies();
-    }
   });
 });

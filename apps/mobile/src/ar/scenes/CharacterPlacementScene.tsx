@@ -11,7 +11,7 @@ import {
   ViroText,
 } from "@reactvision/react-viro";
 import { getCharacter, getCharacterSource } from "../../features/characters/characterCatalog";
-import type { ArenaPosition } from "../../features/characters/types";
+import type { ArenaPosition } from "@codexwars/shared";
 import { getSceneBridge, mapViroTrackingState, type ArSceneProps } from "./sceneBridge";
 
 ViroMaterials.createMaterials({

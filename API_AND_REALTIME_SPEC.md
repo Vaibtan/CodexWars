@@ -167,7 +167,7 @@ Official references:
 ## 4. Identifiers, time, ordering, and compatibility
 
 ```ts
-type ProtocolVersion = 1;
+type ProtocolVersion = 2;
 type RoomId = string;       // four-digit public code and Colyseus roomId
 type PlayerId = string;     // server-generated, room-scoped
 type RoundId = number;      // starts at 1; increments on reset
@@ -192,7 +192,7 @@ Reset increments `roundId`, clears command deduplication, and resets `eventSeque
 
 ### 4.2 Server time
 
-`serverNow` is synchronized in room state at least once per second and on important transitions. Clients estimate `serverTimeOffset = serverNow - localNow` and render quiz/countdown/battle timers from server deadlines. A client clock never accepts a quiz answer, starts battle, resolves attack order, or ends a match.
+`serverNow` is synchronized in room state at least once per second and on important transitions. When a snapshot is observed, clients anchor its `serverNow` to that observation's local time and advance the estimate by subsequent local elapsed time. Quiz/countdown/battle displays render from server deadlines. A client clock never accepts a quiz answer, starts battle, resolves attack order, or ends a match.
 
 ### 4.3 Protocol compatibility
 

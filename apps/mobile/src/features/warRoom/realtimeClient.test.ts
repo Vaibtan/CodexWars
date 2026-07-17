@@ -70,7 +70,7 @@ describe("WarRoomRealtimeClient", () => {
     const client = await attaching;
     transport.emitState({ ...roomState, players: {} });
 
-    const sending = client.send({ category: "mixed", contentMode: "mixed", currentEventsLookbackDays: 14, difficultyProfile: "balanced", type: "configure_quiz" });
+    const sending = client.send("configure_quiz", { category: "mixed", contentMode: "mixed", currentEventsLookbackDays: 14, difficultyProfile: "balanced" });
     const command = transport.sent.at(-1)!;
     expect(command).toMatchObject({ payload: { category: "mixed", contentMode: "mixed", currentEventsLookbackDays: 14, difficultyProfile: "balanced", roundId: 1 }, type: "configure_quiz" });
     const commandId = (command.payload as { commandId: string }).commandId;
@@ -105,7 +105,7 @@ describe("WarRoomRealtimeClient", () => {
       session: { nickname: "Ada", playerId: "player-1", role: "participant", roomId: "0427" },
     });
 
-    const sending = client.send({ selection: { characterId: "wizard", colorId: "violet" }, type: "select_character" });
+    const sending = client.send("select_character", { characterId: "wizard", colorId: "violet" });
     const sentCommand = transport.sent.at(-1)!;
     expect(sentCommand).toMatchObject({
       payload: { characterId: "wizard", colorId: "violet", roundId: 1 },
@@ -131,7 +131,7 @@ describe("WarRoomRealtimeClient", () => {
     expect(client.getSnapshot().error?.message).toContain("Invalid synchronized War Room state");
 
     transport.emitState(roomState);
-    const sending = client.send({ type: "ready_changed", ready: true });
+    const sending = client.send("ready_changed", { ready: true });
     const commandId = (transport.sent.at(-1)!.payload as { commandId: string }).commandId;
     transport.emitMessage("server_error", {
       code: "NOT_LOCALIZED",

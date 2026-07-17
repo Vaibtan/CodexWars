@@ -2,15 +2,16 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { boot, ColyseusTestServer } from "@colyseus/testing";
 import type { Room as ClientRoom } from "@colyseus/sdk";
 import { GENERAL_KNOWLEDGE_FALLBACK_V1 } from "@codexwars/shared";
-import appConfig, { createAppConfig } from "../src/app.config.js";
-import { setWarRoomDependenciesForTest } from "../src/rooms/war-room.js";
+import { createAppConfig } from "../src/app.config.js";
 import { WarRoomHarness } from "./support/war-room-harness.js";
 
 let colyseus: ColyseusTestServer;
 let rehearsalBaseline: string | undefined;
+let logs: unknown[] = [];
+let now = 0;
 
 beforeAll(async () => {
-  colyseus = await boot(appConfig);
+  colyseus = await boot(createAppConfig({ log: (entry) => logs.push(entry), now: () => now }));
 });
 
 afterAll(async () => {
@@ -19,6 +20,8 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await colyseus.cleanup();
+  logs = [];
+  now = 0;
 });
 
 describe("War Room admission", () => {
@@ -119,9 +122,7 @@ describe("War Room admission", () => {
   });
 
   it("eliminates once and retains stable standings across explicit battle and results leaves", async () => {
-    let now = 1_000_000;
-    const restoreDependencies = setWarRoomDependenciesForTest({ log: () => undefined, now: () => now });
-    try {
+    now = 1_000_000;
       const harness = await WarRoomHarness.create(colyseus);
       const first = await harness.joinParticipant("Ada");
       const second = await harness.joinParticipant("Grace");
@@ -151,9 +152,6 @@ describe("War Room admission", () => {
 
       expect(room.state.players.has(winnerPlayerId)).toBe(false);
       expect([...room.state.battle.standings].map((standing) => standing.playerId)).toEqual(standingIds);
-    } finally {
-      restoreDependencies();
-    }
   });
 
   it("restores an unexpectedly disconnected participant with the same player record", async () => {
@@ -199,9 +197,6 @@ describe("War Room admission", () => {
   });
 
   it("logs only redacted correlation metadata for rejected traffic", async () => {
-    const logs: unknown[] = [];
-    const restoreDependencies = setWarRoomDependenciesForTest({ log: (entry) => logs.push(entry) });
-    try {
       const harness = await WarRoomHarness.create(colyseus, "Teacher Secret");
       const participant = await harness.joinParticipant("Ada Secret");
 
@@ -215,16 +210,11 @@ describe("War Room admission", () => {
         roomIdHash: expect.any(String)
       }]);
       expect(JSON.stringify(logs)).not.toContain("Secret");
-    } finally {
-      restoreDependencies();
-    }
   });
 
   it.each([1, 2])("rehearses a deterministic twelve-participant room through reset without leaking quiz answers (run %i)", async (run) => {
-    let now = 1_000_000;
+    now = 1_000_000;
     const startedAt = Date.now();
-    const restoreDependencies = setWarRoomDependenciesForTest({ log: () => undefined, now: () => now });
-    try {
       const harness = await WarRoomHarness.create(colyseus);
       const { room } = harness;
       let organizer: ClientRoom = harness.organizer;
@@ -340,9 +330,6 @@ describe("War Room admission", () => {
         run,
         scenario: "p0-m1-rehearsal"
       }));
-    } finally {
-      restoreDependencies();
-    }
   }, 20_000);
 
   it("ends pre-restart sessions and accepts a new room after a fresh server boot", async () => {

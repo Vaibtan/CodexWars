@@ -1,9 +1,9 @@
 import appConfig from "./app.config.js";
 import { serverConfig } from "./config.js";
-import { beginWarRoomShutdown } from "./rooms/war-room.js";
+import { beginProductionShutdown } from "./runtime-services.js";
 
 async function shutdown(): Promise<void> {
-  beginWarRoomShutdown();
+  beginProductionShutdown();
   await appConfig.gracefullyShutdown(false);
 }
 

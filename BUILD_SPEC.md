@@ -12,7 +12,7 @@ This document owns dependency pins, repository boundaries, local development, ve
 2. Keep live room state in one authoritative Colyseus `WarRoom`; there is no Firebase, database, or account dependency, and the curated fallback completes a round without internet access.
 3. Keep server game logic platform-neutral. The server receives only validated 2D positions and attack directions.
 4. Keep every Viro import under `apps/mobile/src/ar/`.
-5. Keep the Colyseus SDK behind `apps/mobile/src/features/warRoom/realtimeClient.ts`; screens send typed intents and consume validated snapshots.
+5. Keep the Colyseus SDK inside `apps/mobile/src/features/warRoom/`: `matchmaking.ts` opens rooms, `colyseusRoomTransport.ts` adapts the SDK room, and `realtimeClient.ts` sends canonical shared command payloads and exposes validated snapshots to screens.
 6. Verify shared/server behavior without devices, then verify AR behavior on physical Android and iPhone devices.
 
 ## 2. Pinned toolchain

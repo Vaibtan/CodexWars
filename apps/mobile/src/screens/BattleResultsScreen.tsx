@@ -3,7 +3,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import type { PublicRoomState } from "@codexwars/shared";
 import { CharacterPreview } from "../components/CharacterPreview";
 import { colors } from "../components/theme";
-import type { CharacterSelection } from "../features/characters/types";
+import type { CharacterSelection } from "@codexwars/shared";
 
 type BattleResultsScreenProps = {
   onDone: () => void;

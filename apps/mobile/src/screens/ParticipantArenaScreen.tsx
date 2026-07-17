@@ -3,8 +3,9 @@ import { StyleSheet, Text, View } from "react-native";
 import type { PublicRoomState } from "@codexwars/shared";
 import { ParticipantArenaArView } from "../ar/ParticipantArenaArView";
 import type { MarkerSpacePose } from "../ar/coordinates";
+import { markerTrackingDecision } from "../ar/markerTrackingPolicy";
 import type { ArSceneBridge, ArMarkerTrackingState, ArTrackingState } from "../ar/types";
-import type { CharacterSelection } from "../features/characters/types";
+import type { CharacterSelection } from "@codexwars/shared";
 import type { WarRoomRealtimeClient } from "../features/warRoom/realtimeClient";
 import { ParticipantBattleScreen } from "./ParticipantBattleScreen";
 import { ParticipantPlacementScreen } from "./ParticipantPlacementScreen";
@@ -34,6 +35,7 @@ export function ParticipantArenaScreen({
   const [markerTracking, setMarkerTracking] = useState<ArMarkerTrackingState>("searching");
   const [pose, setPose] = useState<MarkerSpacePose | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const battleMarkerDecision = markerTrackingDecision("battle", markerTracking, tracking);
   const player = client.session.playerId === null ? undefined : room.players[client.session.playerId];
   const position = player?.positionLocked
     ? { x: player.positionX, z: player.positionZ }
@@ -68,13 +70,13 @@ export function ParticipantArenaScreen({
 
   useEffect(() => {
     if (!player || mode !== "battle") return;
-    const localization = markerTracking === "lost" || markerTracking === "searching" ? "lost" : "localized";
+    const localization = battleMarkerDecision.localization;
     if (player.localization === localization) return;
     setSyncError(null);
-    void client.send({ state: localization, type: "localization_changed" }).catch((error: unknown) => {
+    void client.send("localization_changed", { state: localization }).catch((error: unknown) => {
       setSyncError(error instanceof Error ? error.message : String(error));
     });
-  }, [client, markerTracking, mode, player]);
+  }, [battleMarkerDecision.localization, client, mode, player]);
 
   return (
     <View style={styles.screen}>

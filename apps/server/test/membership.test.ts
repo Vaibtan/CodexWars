@@ -112,4 +112,51 @@ describe("War Room membership", () => {
     expect(state.players.get("player-1")).toMatchObject({ combatIncluded: true, connected: false, eliminated: true, hp: 0 });
     expect(membership.leaveConnectedParticipant("participant-session", 2_001)).toBeUndefined();
   });
+
+  it("owns combat inclusion and complete participant reset between rounds", () => {
+    const state = new WarRoomState();
+    const membership = new WarRoomMembership(state);
+    membership.join("organizer-session", "Teacher");
+    const retained = membership.join("participant-1", "Ada");
+    const departed = membership.join("participant-2", "Grace");
+    expect(retained.kind).toBe("participant");
+    expect(departed.kind).toBe("participant");
+    if (retained.kind !== "participant" || departed.kind !== "participant") throw new Error("Expected participants");
+    retained.commandOutcomes.set("old-command", { command: "ready_changed", commandId: "old-command", roundId: 1, serverNow: 1_000 });
+    const player = state.players.get(retained.playerId)!;
+    Object.assign(player, {
+      characterColorId: "violet",
+      characterId: "wizard",
+      correctAnswers: 7,
+      eliminated: true,
+      hp: 0,
+      localization: "localized",
+      positionLocked: true,
+      positionX: 2,
+      quizCompleted: true,
+      ready: true,
+      shield: 15
+    });
+    membership.drop(departed.sessionId, 2_000);
+
+    expect(membership.setCombatIncluded(retained.playerId, false)).toBe(true);
+    expect(player).toMatchObject({ combatIncluded: false, localization: "not_started", positionLocked: false, ready: false });
+    membership.resetRound();
+
+    expect(state.players.has(departed.playerId)).toBe(false);
+    expect(player).toMatchObject({
+      characterColorId: "gold",
+      characterId: "default",
+      combatIncluded: true,
+      correctAnswers: 0,
+      eliminated: false,
+      hp: 100,
+      localization: "not_started",
+      positionLocked: false,
+      quizCompleted: false,
+      ready: false,
+      shield: 0
+    });
+    expect(retained.commandOutcomes.size).toBe(0);
+  });
 });

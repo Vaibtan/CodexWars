@@ -14,7 +14,7 @@ Three layers, one hard rule per boundary:
 | Layer | Owns | Hard rule |
 |---|---|---|
 | **AR presentation** (`apps/mobile/src/ar/`) | Marker tracking, coordinate conversion, rendering bundled GLBs/effects in camera space | Only place Viro is imported. Publishes plain 2D data; never touches the network. |
-| **Game client** (`apps/mobile/src/{features,screens,components}`) | UI, local state, Colyseus connection | Never imports Viro types outside `src/ar`. Treats AR as a sensor behind the `ArSceneBridge` contract; only `features/warRoom/realtimeClient.ts` imports `@colyseus/sdk`. |
+| **Game client** (`apps/mobile/src/{features,screens,components}`) | UI, local state, Colyseus connection | Never imports Viro types outside `src/ar`. Treats AR as a sensor behind the `ArSceneBridge` contract; only the `features/warRoom/` transport and matchmaking boundary imports `@colyseus/sdk`. |
 | **Authoritative server** (`apps/server/`) | Rooms, phase machine, validation, combat, results | Never knows AR exists. Consumes marker-relative 2D coordinates as opaque numbers. |
 
 All three compile against `packages/shared` (types, protocol, constants, pure game math). The math is written once and executed in two places: the server uses it authoritatively; the client uses the same functions for prediction (crosshair target highlight), which is why predicted and actual results almost always agree.
@@ -61,12 +61,13 @@ flowchart TB
         subgraph AR["ar/ (Viro boundary)"]
             SESSION["ParticipantArenaArView + SharedArenaScene<br/>retained marker tracking and GLB rendering"]
             COORD["coordinates.ts<br/>pure marker-space math"]
+            TRACKING["markerTrackingPolicy.ts<br/>phase-aware localization and lock policy"]
         end
         subgraph CORE["app core"]
             APP["App.tsx<br/>screen and room lifecycle"]
             SCREENS["screens/<br/>participant and organizer overlays"]
             ROOMHOOK["useWarRoom.ts<br/>validated room snapshot subscription"]
-            NET["features/warRoom/realtimeClient<br/>@colyseus/sdk adapter<br/>matchmake · validate · messages · reconnect"]
+            NET["features/warRoom/<br/>matchmaking · SDK transport · validated realtime client<br/>canonical commands · reconnect · server clock"]
             HUD["components/<br/>crosshair, HP bars, fire buttons"]
         end
     end
@@ -74,8 +75,10 @@ flowchart TB
     subgraph SERVER["apps/server"]
         CODES["roomId.ts<br/>unique 4-digit roomId allocation"]
         ROOM["rooms/war-room.ts<br/>lifecycle · phase machine · validation"]
+        ROUND["rooms/battle-round.ts + membership.ts<br/>battle and participant lifecycle invariants"]
         SCHEMA["rooms/state.ts<br/>Colyseus synced state"]
         PREP["quiz/QuizPreparation<br/>generation · grounding · review · fallback"]
+        EVIDENCE["quiz/EvidencePool<br/>cache · single-flight · cancellation · usage"]
         MODEL["quiz/OpenAI adapter<br/>AI SDK + Responses web search"]
         CONFIG["config.ts<br/>typed limits · capability · secrets"]
     end
@@ -88,22 +91,24 @@ flowchart TB
     end
 
     SESSION --> COORD
+    SESSION --> TRACKING
     SESSION -->|"marker pose and aim"| SCREENS
     SCREENS -->|"actors and phase"| SESSION
     APP --> SCREENS & ROOMHOOK
     SCREENS --> HUD & NET
     ROOMHOOK <--> NET
     NET <-->|"WebSocket"| ROOM
-    ROOM --> SCHEMA & CODES & PREP
-    PREP --> MODEL & QUIZ & CONFIG
-    ROOM -->|authoritative| COMBAT
+    ROOM --> SCHEMA & CODES & PREP & ROUND
+    PREP --> EVIDENCE & MODEL & QUIZ & CONFIG
+    EVIDENCE --> MODEL
+    ROUND -->|authoritative| COMBAT
     SCREENS -->|target highlight only| COMBAT
     SHARED -.types.- MOBILE & SERVER
 ```
 
-`WarRoom` depends only on the `QuizPreparation.prepare(request, signal)` interface. Provider types, web-search orchestration, retries, evidence policy, review, budgets, and fallback selection remain inside `apps/server/src/quiz/`. `QuizRun` consumes an immutable validated `QuizTemplate` and performs no external calls. Dependency direction remains downward into `shared`; `shared` imports nothing from `apps`.
+`WarRoom` is registered with one immutable dependency set and depends only on the `QuizPreparation.prepare(request, signal)` interface. `BattleRound` owns battle mutation order and completion; `WarRoomMembership` owns participant inclusion and round reset. Provider types, web-search orchestration, retries, evidence policy, review, budgets, and fallback selection remain inside `apps/server/src/quiz/`. `QuizRun` consumes an immutable validated `QuizTemplate` and performs no external calls. Dependency direction remains downward into `shared`; `shared` imports nothing from `apps`.
 
-`QuizPreparation` keeps a bounded process-local evidence cache, not a generated-quiz cache. The cache key includes the locked model and prompt versions, trusted-source policy, bounded quiz configuration, and a short UTC freshness bucket. Equivalent concurrent preparations share one cancellable evidence lookup; each preparation still performs its own candidate generation, independent review, validation, and template-ID assignment. Only transient candidate generation is retried, using the same evidence. Search budget is reserved before a fresh lookup, so a failed discovery or later-stage failure cannot erase the potential search charge from operational usage. Exhausting the search quota blocks new searches but not zero-search cache reuse; the independent generation budget still applies.
+`EvidencePool` keeps a bounded process-local evidence cache, not a generated-quiz cache. The cache key includes the locked model and prompt versions, trusted-source policy, bounded quiz configuration, and a short UTC freshness bucket. Equivalent concurrent preparations share one cancellable evidence lookup; each preparation still performs its own candidate generation, independent review, validation, and template-ID assignment. Only transient candidate generation is retried, using the same evidence. Search budget is reserved before a fresh lookup and attributed exactly once to a surviving preparation. Exhausting the search quota blocks new searches but not zero-search cache reuse; the independent generation budget still applies.
 
 ---
 
@@ -321,7 +326,7 @@ stateDiagram-v2
     tracking_lost --> [*]: AR screen unmounts
 ```
 
-The server receives only coarse `searching` / `localized` / `lost` state. The mobile bridge maps both tracked and degraded anchors to `localized`; it maps searching, marker removal, or unavailable world tracking to `lost`. Before countdown, `lost` clears readiness. During P0 battle, degraded tracking may keep firing only while timestamped marker-relative poses remain fresh. Lost/stale tracking retains the locked server position but disables firing, shows a re-scan prompt, and does not pause the shared match. A frozen last-known aim is never sent.
+The server receives only coarse `searching` / `localized` / `lost` state. The phase-aware mobile marker policy maps tracked and degraded anchors to `localized`. During localization/positioning, an unacquired marker remains `searching`; during battle it maps to `lost`. Explicit marker loss maps to `lost` in every phase, and only a fully tracked marker with normal world tracking permits position lock. Before countdown, `lost` clears readiness. During P0 battle, degraded tracking may keep firing only while timestamped marker-relative poses remain fresh. Lost/stale tracking retains the locked server position but disables firing, shows a re-scan prompt, and does not pause the shared match. A frozen last-known aim is never sent.
 
 ### 5.3 Player lifecycle (server-owned, per participant)
 

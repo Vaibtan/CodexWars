@@ -52,6 +52,14 @@ export type CommandPayload<Name extends CommandName = CommandName> = CommandMeta
 export type CommandEnvelope = { [Name in CommandName]: { readonly name: Name; readonly payload: CommandPayload<Name> } }[CommandName];
 export type ValidatedCommand = { [Name in CommandName]: CommandPayload<Name> & { readonly command: Name } }[CommandName];
 
+export function commandEnvelope<Name extends CommandName>(
+  name: Name,
+  payload: CommandPayloads[Name],
+  meta: CommandMeta
+): { readonly name: Name; readonly payload: CommandPayload<Name> } {
+  return { name, payload: { ...payload, ...meta } };
+}
+
 const ORGANIZER_COMMAND_NAMES: ReadonlySet<CommandName> = new Set(["approve_quiz", "cancel_quiz_preparation", "configure_arena", "configure_quiz", "prepare_quiz", "regenerate_quiz", "reset_round", "set_combat_included", "start_battle", "start_quiz"]);
 const POSITION_COMMAND_NAMES: ReadonlySet<CommandName> = new Set(["localization_changed", "lock_position", "ready_changed", "unlock_position"]);
 

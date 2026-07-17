@@ -1,9 +1,7 @@
-import { ArraySchema } from "@colyseus/schema";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { Client, Room, type AuthContext } from "@colyseus/core";
 import {
   ARENA,
-  applyDamage,
   ATTACK_COMMANDS_PER_SECOND,
   BATTLE,
   COMMAND_NAMES,
@@ -12,16 +10,11 @@ import {
   isPositionCommand,
   isSessionRequestPayload,
   MAX_COMMANDS_PER_ROUND,
-  normalizeDirection,
   parseCommand,
   POSITION_COMMANDS_PER_SECOND,
   publicQuizQuestion,
   PROTOCOL_VERSION,
-  resolveBoltAttack,
-  startingShieldForScore,
-  standingsFor,
   validatePosition,
-  WEAPONS,
   type CommandName,
   type ClientEventName,
   type ClientEventPayloads,
@@ -30,14 +23,13 @@ import {
   type ServerEventPayloads,
   type PlayerId,
   type QuizConfiguration,
-  type Standing,
   type ValidatedCommand
 } from "@codexwars/shared";
-import { serverConfig } from "../config.js";
 import type { AdmissionControl } from "../admission-control.js";
-import { QuizPreparationCancelledError, type PreparedQuiz, type QuizPreparation, type QuizPreparationOutcome, type QuizTelemetry } from "../quiz/index.js";
-import { productionAdmission, productionQuizPreparation, productionQuizTelemetry } from "../runtime-services.js";
-import { BattleState, PlayerState, StandingState, WarRoomState } from "./state.js";
+import { estimatedTextCostUsd, QuizPreparationCancelledError, type PreparedQuiz, type QuizPreparation, type QuizPreparationOutcome, type QuizTelemetry } from "../quiz/index.js";
+import { WarRoomState } from "./state.js";
+import { BattleRound, type BattleRoundEvent } from "./battle-round.js";
+import { combatantFromPlayer } from "./combatant-state.js";
 import { type CommandOutcome, type ParticipantMember, WarRoomMembership } from "./membership.js";
 import { QuizRun } from "./quiz-run.js";
 import { RoomIdAllocator, type PresenceSet } from "./room-id.js";
@@ -46,12 +38,8 @@ interface JoinAuth {
   readonly displayName: string;
 }
 
-interface CombatBlocker {
-  readonly playerId: string;
-  readonly reason: string;
-}
-
 export interface WarRoomDependencies {
+  readonly acceptingTraffic: () => boolean;
   readonly admission: AdmissionControl;
   readonly createRoomIdAllocator: (presence: PresenceSet) => RoomIdAllocator;
   readonly log: (entry: OperationalLogEntry) => void;
@@ -61,6 +49,7 @@ export interface WarRoomDependencies {
   readonly quizTelemetry: QuizTelemetry;
   readonly maxRegenerationsPerRound: number;
   readonly reconnectGraceMs: (configuredGraceMs: number) => number;
+  readonly trustProxy: boolean;
 }
 
 export interface RedactedLogEntry {
@@ -89,33 +78,6 @@ export interface QuizPreparationLogEntry {
 
 export type OperationalLogEntry = QuizPreparationLogEntry | RedactedLogEntry;
 
-const productionDependencies: WarRoomDependencies = {
-  admission: productionAdmission,
-  createRoomIdAllocator: (presence) => new RoomIdAllocator(presence),
-  log: (entry) => console.info(JSON.stringify(entry)),
-  now: () => Date.now(),
-  newPreparationId: randomUUID,
-  quizPreparation: productionQuizPreparation,
-  quizTelemetry: productionQuizTelemetry,
-  maxRegenerationsPerRound: serverConfig.generation.maxRegenerationsPerRound,
-  reconnectGraceMs: (configuredGraceMs) => configuredGraceMs
-};
-
-let dependencies: WarRoomDependencies = productionDependencies;
-let acceptingTraffic = true;
-
-export function beginWarRoomShutdown(): void {
-  acceptingTraffic = false;
-}
-
-export function setWarRoomDependenciesForTest(overrides: Partial<WarRoomDependencies>): () => void {
-  const previous = dependencies;
-  dependencies = { ...productionDependencies, ...overrides };
-  return () => {
-    dependencies = previous;
-  };
-}
-
 function normalizeDisplayName(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const normalized = value.normalize("NFKC").trim().replace(/\s+/gu, " ");
@@ -127,14 +89,11 @@ function isJoinOptions(value: unknown): value is { readonly displayName: unknown
   return typeof value === "object" && value !== null && !Array.isArray(value) && Object.keys(value).every((key) => key === "displayName" || key === "protocolVersion") && "displayName" in value && "protocolVersion" in value;
 }
 
-function positionOf(player: PlayerState): { readonly x: number; readonly z: number } | undefined {
-  return player.positionLocked ? { x: player.positionX, z: player.positionZ } : undefined;
-}
-
 export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
   declare state: WarRoomState;
 
   private codeAllocated = false;
+  private battleRound!: BattleRound;
   private membership!: WarRoomMembership;
   private roomIdAllocator: RoomIdAllocator | undefined;
   private quizRun!: QuizRun;
@@ -144,11 +103,16 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
   private preparation: { readonly controller: AbortController; readonly id: string; readonly roundId: number; readonly startedAt: number } | undefined;
   private lastSuccessfulActivityAt = 0;
 
+  constructor(private readonly dependencies: Readonly<WarRoomDependencies>) {
+    super();
+  }
+
   async onCreate(): Promise<void> {
     this.autoDispose = false;
     this.maxClients = ARENA.MAX_PARTICIPANTS + 1;
     this.patchRate = 100;
     this.setState(new WarRoomState());
+    this.battleRound = new BattleRound(this.state, (event) => this.emitBattleEvent(event));
     this.membership = new WarRoomMembership(this.state);
     this.quizRun = new QuizRun(this.state, {
       participantEvent: (playerId, type, payload) => this.sendToPlayer(playerId, type, payload),
@@ -166,13 +130,13 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
   }
 
   onAuth(client: Client, options: unknown, context: AuthContext): JoinAuth {
-    if (!acceptingTraffic) throw new Error("ROOM_NOT_JOINABLE");
+    if (!this.dependencies.acceptingTraffic()) throw new Error("ROOM_NOT_JOINABLE");
     if (!isJoinOptions(options) || options.protocolVersion !== PROTOCOL_VERSION) {
       throw new Error("CLIENT_VERSION_UNSUPPORTED");
     }
     const displayName = normalizeDisplayName(options.displayName);
     if (displayName === undefined) throw new Error("NICKNAME_INVALID");
-    const ip = sourceIp(context);
+    const ip = sourceIp(context, this.dependencies.trustProxy);
     this.clientIps.set(client.sessionId, ip);
     if (this.membership.hasOrganizer && this.state.players.size >= ARENA.MAX_PARTICIPANTS) {
       throw new Error("ROOM_FULL");
@@ -211,7 +175,7 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
     if (departure?.disposition === "retained") this.transitionToPositioningWhenLocalized();
     if (departure?.disposition === "eliminated") {
       this.emitEvent("player_eliminated", { eliminatedByPlayerId: null, playerId: departure.participant.playerId });
-      this.completeIfLastAlive();
+      this.battleRound.completeIfLastAlive();
     }
   }
 
@@ -235,11 +199,11 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
   }
 
   private now(): number {
-    return dependencies.now();
+    return this.dependencies.now();
   }
 
   private async allocateRoomId(): Promise<void> {
-    this.roomIdAllocator = dependencies.createRoomIdAllocator(this.presence);
+    this.roomIdAllocator = this.dependencies.createRoomIdAllocator(this.presence);
     this.roomId = await this.roomIdAllocator.allocate();
     this.codeAllocated = true;
   }
@@ -354,11 +318,8 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
 
   private setCombatIncluded(client: Client, command: Extract<ValidatedCommand, { command: "set_combat_included" }>): boolean {
     if (this.state.phase !== "lobby") return this.rejectPhase(client, command.commandId);
-    const target = this.state.players.get(command.playerId);
-    if (target === undefined) return this.reject(client, "ROLE_FORBIDDEN", command.commandId);
-    target.combatIncluded = command.included;
-    if (!command.included) this.clearPreBattleState(target);
-    return true;
+    return this.membership.setCombatIncluded(command.playerId, command.included)
+      || this.reject(client, "ROLE_FORBIDDEN", command.commandId);
   }
 
   private selectCharacter(client: Client, actor: ParticipantMember, command: Extract<ValidatedCommand, { command: "select_character" }>): boolean {
@@ -406,14 +367,14 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
   }
 
   private prepareQuiz(client: Client, command: Extract<ValidatedCommand, { command: "prepare_quiz" | "regenerate_quiz" }>, regeneration: boolean): boolean {
-    if (!acceptingTraffic) return this.reject(client, "QUIZ_NOT_READY", command.commandId);
+    if (!this.dependencies.acceptingTraffic()) return this.reject(client, "QUIZ_NOT_READY", command.commandId);
     if (this.state.phase !== "lobby" || this.state.quiz.status === "unconfigured") return this.reject(client, "QUIZ_NOT_READY", command.commandId);
     if (this.preparation !== undefined) return this.reject(client, "QUIZ_GENERATION_IN_PROGRESS", command.commandId);
-    if (regeneration && this.state.quiz.regenerationCount >= dependencies.maxRegenerationsPerRound) {
+    if (regeneration && this.state.quiz.regenerationCount >= this.dependencies.maxRegenerationsPerRound) {
       return this.reject(client, "QUIZ_GENERATION_LIMIT_REACHED", command.commandId);
     }
     if (!regeneration && this.state.quiz.status !== "configured") return this.reject(client, "QUIZ_NOT_READY", command.commandId);
-    if (!dependencies.admission.allow("generation", this.clientIps.get(client.sessionId) ?? "unknown", this.now())) {
+    if (!this.dependencies.admission.allow("generation", this.clientIps.get(client.sessionId) ?? "unknown", this.now())) {
       return this.reject(client, "RATE_LIMITED", command.commandId);
     }
 
@@ -421,7 +382,7 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
     this.preparedQuiz = undefined;
     this.preparedPreparationId = "";
     if (regeneration) this.state.quiz.regenerationCount += 1;
-    const preparation = { controller: new AbortController(), id: dependencies.newPreparationId(), roundId: this.state.roundId, startedAt: this.now() };
+    const preparation = { controller: new AbortController(), id: this.dependencies.newPreparationId(), roundId: this.state.roundId, startedAt: this.now() };
     this.preparation = preparation;
     this.state.quiz.templateId = "";
     this.state.quiz.source = "";
@@ -448,7 +409,7 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
 
   private async completePreparation(preparation: NonNullable<WarRoom["preparation"]>, configuration: QuizConfiguration): Promise<void> {
     try {
-      const prepared = await dependencies.quizPreparation.prepare({ configuration, preparationId: preparation.id, roomId: this.roomId, roundId: preparation.roundId }, preparation.controller.signal);
+      const prepared = await this.dependencies.quizPreparation.prepare({ configuration, preparationId: preparation.id, roomId: this.roomId, roundId: preparation.roundId }, preparation.controller.signal);
       if (this.preparation !== preparation || preparation.roundId !== this.state.roundId || preparation.controller.signal.aborted) return;
       this.preparation = undefined;
       this.preparedQuiz = prepared;
@@ -491,12 +452,12 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
 
   private recordPreparation(preparation: { readonly id: string; readonly roundId: number; readonly startedAt: number }, outcome: QuizPreparationOutcome, usage: { readonly inputTokens: number; readonly outputTokens: number; readonly searchCalls: number }, sourceCount = 0): void {
     const durationMs = Math.max(0, this.now() - preparation.startedAt);
-    dependencies.quizTelemetry.record({ durationMs, outcome, ...usage });
-    dependencies.log({
+    this.dependencies.quizTelemetry.record({ durationMs, outcome, ...usage });
+    this.dependencies.log({
       correlationId: preparation.id,
       durationMs,
       eventType: "quiz_preparation",
-      estimatedTextCostUsd: (usage.inputTokens * 0.75 + usage.outputTokens * 4.5) / 1_000_000,
+      estimatedTextCostUsd: estimatedTextCostUsd(usage),
       inputTokens: usage.inputTokens,
       model: "gpt-5.4-mini-2026-03-17",
       outcome,
@@ -550,7 +511,7 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
     if (player.localization !== "localized") return this.reject(client, "NOT_LOCALIZED", command.commandId);
     const locked = [...this.state.players.values()]
       .filter((candidate) => candidate.playerId !== player.playerId && candidate.combatIncluded && candidate.positionLocked)
-      .map((candidate) => this.combatant(candidate));
+      .map(combatantFromPlayer);
     const validation = validatePosition({ x: command.x, z: command.z }, this.state.arena.radiusM, locked);
     if (!validation.ok) return this.reject(client, validation.reason, command.commandId, { correction: validation.correction, distanceM: validation.distanceM, ...(validation.conflictsWithPlayerId === undefined ? {} : { conflictsWithPlayerId: validation.conflictsWithPlayerId }) });
     player.positionX = command.x;
@@ -581,73 +542,20 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
 
   private startBattle(client: Client, now: number): boolean {
     if (this.state.phase !== "positioning") return this.rejectPhase(client);
-    const combatPlayers = [...this.state.players.values()].filter((player) => player.combatIncluded);
-    const blockers: CombatBlocker[] = combatPlayers.flatMap((player) => this.startBlockers(player));
-    if (combatPlayers.length < 2) blockers.push({ playerId: "room", reason: "MINIMUM_COMBATANTS" });
-    if (blockers.length > 0) return this.reject(client, "BATTLE_START_BLOCKED", undefined, { blockers });
-    for (const player of combatPlayers) {
-      player.maxHp = BATTLE.START_HP;
-      player.hp = BATTLE.START_HP;
-      player.shield = startingShieldForScore(player.correctAnswers);
-      player.charges = WEAPONS.bolt.charges;
-      player.nextAttackAt = 0;
-      player.eliminated = false;
-    }
-    this.state.phase = "countdown";
-    this.state.battle.status = "countdown";
-    this.state.battle.startsAt = now + BATTLE.COUNTDOWN_MS;
-    this.state.battle.endsAt = this.state.battle.startsAt + BATTLE.DURATION_MS;
-    this.emitEvent("battle_countdown_started", { endsAt: this.state.battle.endsAt, startsAt: this.state.battle.startsAt });
+    const result = this.battleRound.start(now);
+    if (!result.ok) return this.reject(client, "BATTLE_START_BLOCKED", undefined, { blockers: result.blockers });
     return true;
   }
 
   private attack(client: Client, actor: ParticipantMember, command: Extract<ValidatedCommand, { command: "attack" }>, now: number): boolean {
-    const attacker = this.state.players.get(actor.playerId);
-    if (!this.canAttack(attacker, now)) return this.reject(client, "ATTACK_NOT_ALLOWED", command.commandId);
-    const direction = normalizeDirection(command.dirX, command.dirZ);
-    if (!direction.ok) return this.reject(client, "ATTACK_DIRECTION_INVALID", command.commandId);
-    if (now < attacker.nextAttackAt) return this.reject(client, "ATTACK_COOLDOWN", command.commandId);
-    attacker.nextAttackAt = now + WEAPONS.bolt.cooldownMs;
-    const resolution = resolveBoltAttack(this.combatant(attacker), [...this.state.players.values()].filter((player) => player.playerId !== attacker.playerId).map((player) => this.combatant(player)), direction.direction);
-    if (resolution.target === undefined) {
-      this.emitEvent("attack_resolved", {
-        attackerId: attacker.playerId,
-        commandId: command.commandId,
-        damage: 0,
-        targetHp: null,
-        targetId: null,
-        targetShield: null
-      });
-      this.completeIfLastAlive();
-      return true;
-    }
-
-    const target = this.state.players.get(resolution.target.playerId)!;
-    const damage = this.applyBoltDamage(target);
-    this.emitEvent("attack_resolved", {
-      attackerId: attacker.playerId,
+    const result = this.battleRound.attack({
       commandId: command.commandId,
-      damage,
-      targetHp: target.hp,
-      targetId: target.playerId,
-      targetShield: target.shield
+      dirX: command.dirX,
+      dirZ: command.dirZ,
+      now,
+      playerId: actor.playerId
     });
-    if (target.eliminated) this.emitEvent("player_eliminated", { eliminatedByPlayerId: attacker.playerId, playerId: target.playerId });
-    this.completeIfLastAlive();
-    return true;
-  }
-
-  private canAttack(attacker: PlayerState | undefined, now: number): attacker is PlayerState {
-    return attacker !== undefined
-      && this.state.phase === "battle"
-      && this.state.battle.status === "active"
-      && now >= this.state.battle.startsAt
-      && now < this.state.battle.endsAt
-      && attacker.connected
-      && attacker.combatIncluded
-      && !attacker.eliminated
-      && attacker.positionLocked
-      && attacker.localization !== "lost";
+    return result.ok || this.reject(client, result.errorCode, command.commandId);
   }
 
   private canConfigureArena(): boolean {
@@ -665,17 +573,8 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
     this.preparedQuiz = undefined;
     this.preparedPreparationId = "";
     this.quizRun.reset();
-    this.state.battle = new BattleState();
-    this.membership.clearCommandOutcomes();
-    this.membership.removeDisconnectedParticipants();
-    for (const player of this.state.players.values()) {
-      this.clearPreBattleState(player);
-      player.characterColorId = "gold";
-      player.characterId = "default";
-      player.combatIncluded = true;
-      player.quizCompleted = false;
-      player.correctAnswers = 0;
-    }
+    this.battleRound.reset();
+    this.membership.resetRound();
     return true;
   }
 
@@ -684,11 +583,7 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
     this.state.serverNow = now;
     this.quizRun.advance(now);
     this.transitionToPositioningWhenLocalized();
-    if (this.state.phase === "countdown" && now >= this.state.battle.startsAt) {
-      this.state.phase = "battle";
-      this.state.battle.status = "active";
-    }
-    if (this.state.phase === "battle" && now >= this.state.battle.endsAt) this.finishBattle("timer");
+    this.battleRound.advance(now);
   }
 
   private transitionToPositioningWhenLocalized(): void {
@@ -697,73 +592,21 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
     if (this.state.arena.configured && combatPlayers.every((player) => player.localization === "localized")) this.state.phase = "positioning";
   }
 
-  private startBlockers(player: PlayerState): readonly CombatBlocker[] {
-    const blockers: CombatBlocker[] = [];
-    if (!player.connected) blockers.push({ playerId: player.playerId, reason: "DISCONNECTED" });
-    if (!player.quizCompleted) blockers.push({ playerId: player.playerId, reason: "QUIZ_INCOMPLETE" });
-    if (player.localization !== "localized") blockers.push({ playerId: player.playerId, reason: "NOT_LOCALIZED" });
-    if (!player.positionLocked) blockers.push({ playerId: player.playerId, reason: "POSITION_UNLOCKED" });
-    if (!player.ready) blockers.push({ playerId: player.playerId, reason: "NOT_READY" });
-    if (player.eliminated) blockers.push({ playerId: player.playerId, reason: "ELIMINATED" });
-    return blockers;
-  }
-
-  private combatant(player: PlayerState) {
-    return {
-      combatIncluded: player.combatIncluded,
-      connected: player.connected,
-      correctAnswers: player.correctAnswers,
-      displayName: player.displayName,
-      eliminated: player.eliminated,
-      hp: player.hp,
-      playerId: player.playerId,
-      position: positionOf(player),
-      shield: player.shield
-    };
-  }
-
-  private applyBoltDamage(target: PlayerState): number {
-    const result = applyDamage(target.hp, target.shield, WEAPONS.bolt.damage);
-    target.shield = result.shield;
-    target.hp = result.hp;
-    target.eliminated = result.eliminated;
-    return WEAPONS.bolt.damage;
-  }
-
-  private completeIfLastAlive(): void {
-    const alive = [...this.state.players.values()].filter((player) => player.combatIncluded && !player.eliminated);
-    if (alive.length <= 1) this.finishBattle("last_alive");
-  }
-
-  private finishBattle(reason: "last_alive" | "timer"): void {
-    if (this.state.battle.status === "completed") return;
-    const standings = standingsFor([...this.state.players.values()].filter((player) => player.combatIncluded).map((player) => this.combatant(player)));
-    const winner = standings[0];
-    this.state.phase = "results";
-    this.state.battle.status = "completed";
-    this.state.battle.completionReason = reason;
-    this.state.battle.winnerId = winner?.playerId ?? "";
-    const stateStandings = new ArraySchema<StandingState>();
-    for (const standing of standings) stateStandings.push(this.toStandingState(standing));
-    this.state.battle.standings = stateStandings;
-    this.emitEvent("battle_completed", { reason, standings, winnerId: this.state.battle.winnerId });
-  }
-
   private allowParticipantReconnection(client: Client, playerId: PlayerId): void {
-    this.allowReconnection(client, dependencies.reconnectGraceMs(BATTLE.DISCONNECT_ELIMINATION_MS) / 1_000)
+    this.allowReconnection(client, this.dependencies.reconnectGraceMs(BATTLE.DISCONNECT_ELIMINATION_MS) / 1_000)
       .catch(() => {
         const disposition = this.membership.participantReconnectExpired(playerId);
         if (disposition === "excluded") this.transitionToPositioningWhenLocalized();
         if (disposition === "eliminated") {
           this.emitEvent("player_eliminated", { eliminatedByPlayerId: null, playerId });
-          this.completeIfLastAlive();
+          this.battleRound.completeIfLastAlive();
         }
       });
   }
 
   private allowOrganizerReconnection(client: Client): void {
     const policy = this.membership.organizerReconnectPolicy();
-    const reconnection = this.allowReconnection(client, dependencies.reconnectGraceMs(policy.graceMs) / 1_000);
+    const reconnection = this.allowReconnection(client, this.dependencies.reconnectGraceMs(policy.graceMs) / 1_000);
     if (policy.closeRoomOnExpiry) reconnection.catch(() => this.disconnect());
     else reconnection.catch(() => undefined);
   }
@@ -787,32 +630,13 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
     return true;
   }
 
-  private clearPreBattleState(player: PlayerState): void {
-    player.hasAnsweredCurrent = false;
-    player.localization = "not_started";
-    player.positionLocked = false;
-    player.positionX = 0;
-    player.positionZ = 0;
-    player.ready = false;
-    player.maxHp = BATTLE.START_HP;
-    player.hp = BATTLE.START_HP;
-    player.shield = 0;
-    player.charges = WEAPONS.bolt.charges;
-    player.nextAttackAt = 0;
-    player.eliminated = false;
-    player.disconnectedAt = 0;
-  }
-
-  private toStandingState(standing: Standing): StandingState {
-    const state = new StandingState();
-    state.rank = standing.rank;
-    state.playerId = standing.playerId;
-    state.displayName = standing.displayName;
-    state.hp = standing.hp;
-    state.shield = standing.shield;
-    state.correctAnswers = standing.correctAnswers;
-    state.eliminated = standing.eliminated;
-    return state;
+  private emitBattleEvent(event: BattleRoundEvent): void {
+    switch (event.type) {
+      case "attack_resolved": return this.emitEvent(event.type, event.payload);
+      case "battle_completed": return this.emitEvent(event.type, event.payload);
+      case "battle_countdown_started": return this.emitEvent(event.type, event.payload);
+      case "player_eliminated": return this.emitEvent(event.type, event.payload);
+    }
   }
 
   private emitEvent<Name extends ServerEventName>(type: Name, payload: ServerEventPayloads[Name]): void {
@@ -846,7 +670,7 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
 
   private error(client: Client, code: ErrorCode, commandId?: string, details?: Record<string, unknown>): void {
     const member = this.membership.memberForSession(client.sessionId);
-    dependencies.log({
+    this.dependencies.log({
       correlationId: commandId ?? "",
       errorCode: code,
       eventType: "server_error",
@@ -864,8 +688,19 @@ export class WarRoom extends Room<{ state: WarRoomState; client: Client }> {
   }
 }
 
-function sourceIp(context: AuthContext): string {
-  if (!serverConfig.trustProxy) {
+export type WarRoomClass = new () => WarRoom;
+
+export function createWarRoomClass(dependencies: WarRoomDependencies): WarRoomClass {
+  const boundDependencies = Object.freeze({ ...dependencies });
+  return class ConfiguredWarRoom extends WarRoom {
+    constructor() {
+      super(boundDependencies);
+    }
+  };
+}
+
+function sourceIp(context: AuthContext, trustProxy: boolean): string {
+  if (!trustProxy) {
     const remoteAddress = context.req?.socket?.remoteAddress;
     return typeof remoteAddress === "string" && remoteAddress.length > 0 ? remoteAddress : "unknown";
   }

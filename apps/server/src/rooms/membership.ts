@@ -1,4 +1,4 @@
-import { BATTLE, type CommandName, type PlayerId } from "@codexwars/shared";
+import { BATTLE, WEAPONS, type CommandName, type PlayerId } from "@codexwars/shared";
 import { PlayerState, WarRoomState } from "./state.js";
 
 export interface CommandOutcome {
@@ -50,6 +50,14 @@ export class WarRoomMembership {
 
   sessionIdForPlayer(playerId: PlayerId): string | undefined {
     return this.participantsById.get(playerId)?.sessionId;
+  }
+
+  setCombatIncluded(playerId: PlayerId, included: boolean): boolean {
+    const player = this.state.players.get(playerId);
+    if (player === undefined) return false;
+    player.combatIncluded = included;
+    if (!included) this.clearPreBattleState(player);
+    return true;
   }
 
   join(sessionId: string, displayName: string): WarRoomMember {
@@ -122,13 +130,9 @@ export class WarRoomMembership {
     const player = this.state.players.get(member.playerId);
     if (player === undefined || !player.connected) return undefined;
     if (this.state.phase === "quiz" || this.state.phase === "localization" || this.state.phase === "positioning") {
-      player.combatIncluded = false;
       player.connected = false;
       player.disconnectedAt = now;
-      player.positionLocked = false;
-      player.positionX = 0;
-      player.positionZ = 0;
-      player.ready = false;
+      this.excludeFromCombat(player);
       return { disposition: "retained", participant: member };
     }
     if (this.state.phase === "countdown" || this.state.phase === "battle") {
@@ -160,6 +164,19 @@ export class WarRoomMembership {
     }
   }
 
+  resetRound(): void {
+    this.clearCommandOutcomes();
+    this.removeDisconnectedParticipants();
+    for (const player of this.state.players.values()) {
+      this.clearPreBattleState(player);
+      player.characterColorId = "gold";
+      player.characterId = "default";
+      player.combatIncluded = true;
+      player.quizCompleted = false;
+      player.correctAnswers = 0;
+    }
+  }
+
   organizerReconnectPolicy(): { readonly closeRoomOnExpiry: boolean; readonly graceMs: number } {
     const activeBattle = this.state.phase === "countdown" || this.state.phase === "battle";
     return activeBattle
@@ -178,12 +195,33 @@ export class WarRoomMembership {
       return "eliminated";
     }
     if (this.state.phase === "results") return undefined;
-    player.combatIncluded = false;
+    this.excludeFromCombat(player);
+    return "excluded";
+  }
+
+  private clearPositioningState(player: PlayerState): void {
     player.positionLocked = false;
     player.positionX = 0;
     player.positionZ = 0;
     player.ready = false;
-    return "excluded";
+  }
+
+  private clearPreBattleState(player: PlayerState): void {
+    player.hasAnsweredCurrent = false;
+    player.localization = "not_started";
+    this.clearPositioningState(player);
+    player.maxHp = BATTLE.START_HP;
+    player.hp = BATTLE.START_HP;
+    player.shield = 0;
+    player.charges = WEAPONS.bolt.charges;
+    player.nextAttackAt = 0;
+    player.eliminated = false;
+    player.disconnectedAt = 0;
+  }
+
+  private excludeFromCombat(player: PlayerState): void {
+    player.combatIncluded = false;
+    this.clearPositioningState(player);
   }
 
   private markConnected(member: WarRoomMember): void {

@@ -99,7 +99,7 @@ Target at least 30 FPS with the maximum visible combat cohort on the designated 
 - Eliminated actors may fade or play an effect, but remain non-interactive.
 - Do not upload or stream camera frames.
 
-`SharedArenaScene` renders synchronized actors as children of `ViroARImageMarker`, so every network X/Z coordinate is interpreted in the marker's local frame. Authoritative transient hit effects remain follow-up presentation work.
+`SharedArenaScene` renders synchronized actors as children of `ViroARImageMarker`, so every network X/Z coordinate is interpreted in the marker's local frame. Authoritative projectile/hit feedback, sound or haptics, and the eliminated-player overlay remain P0/M1 presentation work and must be completed before the mixed-platform M1 gate passes.
 
 ## 7. M0 device gate
 

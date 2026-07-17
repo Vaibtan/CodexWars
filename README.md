@@ -36,7 +36,7 @@ The hackathon demo targets 3–4 physical devices, while the room model supports
 
 ## Delivery status
 
-The authoritative Colyseus backend, mobile realtime adapter, shared marker-space conversion, retained Viro scene, bundled character catalog, Android bundle, and ARM64 development APK build are implemented. Physical Android/iPhone M0 measurements and the complete mixed-platform M1 rehearsal are still open; see [`M0_RESULTS.md`](M0_RESULTS.md). A successful build does not prove shared physical alignment.
+The authoritative Colyseus backend, mobile realtime adapter, shared marker-space conversion, retained Viro scene, bundled character catalog, Android bundle, and ARM64 development APK build are implemented. P0 combat presentation still needs authoritative projectile/hit feedback, sound or haptics, and the eliminated-player overlay. Physical Android/iPhone M0 measurements and the complete mixed-platform M1 rehearsal are also open; see [`M0_RESULTS.md`](M0_RESULTS.md). A successful build does not prove shared physical alignment or complete the M1 experience.
 
 ## Team
 

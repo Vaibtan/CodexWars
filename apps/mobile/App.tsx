@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ArDemoScreen } from "./src/ar/ArDemoScreen";
-import type { CharacterSelection } from "./src/features/characters/types";
+import type { CharacterSelection } from "@codexwars/shared";
 import {
   createOrganizerWarRoom,
   joinParticipantWarRoom,
@@ -147,7 +147,7 @@ export default function App() {
           onBack={() => setScreen("participant-quiz-results")}
           onNext={(nextSelection) => {
             setSelection(nextSelection);
-            void client.send({ selection: nextSelection, type: "select_character" })
+            void client.send("select_character", nextSelection)
               .then(() => setScreen("participant-placement"))
               .catch((error: unknown) => setConnectionError(error instanceof Error ? error.message : String(error)));
           }}
@@ -179,7 +179,7 @@ export default function App() {
         <BattleResultsScreen
           onDone={leaveRoom}
           onRunAnotherRound={client && warRoom.room ? () => {
-            void client.send({ type: "reset_round" }).then(() => setScreen("organizer-dashboard"));
+            void client.send("reset_round", {}).then(() => setScreen("organizer-dashboard"));
           } : undefined}
           role="organizer"
           room={warRoom.room}

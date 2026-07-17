@@ -4,13 +4,14 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { startingShieldForScore, type PublicRoomState } from "@codexwars/shared";
 import { colors } from "../components/theme";
 import type { WarRoomRealtimeClient } from "../features/warRoom/realtimeClient";
+import { useServerClock } from "../features/warRoom/serverClock";
 
 export function ParticipantQuizScreen({ client, onLeave, room }: { client: WarRoomRealtimeClient; onLeave: () => void; room: PublicRoomState }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [clock, setClock] = useState(Date.now());
+  const clock = useServerClock(room.serverNow, 500);
   const question = room.quiz.currentQuestion.id ? room.quiz.currentQuestion : null;
   const participant = client.session.playerId === null ? undefined : room.players[client.session.playerId];
 
@@ -22,17 +23,14 @@ export function ParticipantQuizScreen({ client, onLeave, room }: { client: WarRo
   useEffect(() => {
     if (participant?.hasAnsweredCurrent) setSubmitted(true);
   }, [participant?.hasAnsweredCurrent]);
-  useEffect(() => { const interval = setInterval(() => setClock(Date.now()), 500); return () => clearInterval(interval); }, []);
-
   const submit = async () => {
     if (!question || !selected || submitted || room.quiz.status !== "question") return;
     setBusy(true); setError(null);
-    try { await client.send({ optionId: selected, questionId: question.id, type: "quiz_answer" }); setSubmitted(true); }
+    try { await client.send("quiz_answer", { optionId: selected, questionId: question.id }); setSubmitted(true); }
     catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); }
     finally { setBusy(false); }
   };
-  const estimatedServerNow = clock + (room.serverNow - Date.now());
-  const seconds = Math.max(0, Math.ceil((room.quiz.questionEndsAt - estimatedServerNow) / 1_000));
+  const seconds = Math.max(0, Math.ceil((room.quiz.questionEndsAt - clock.serverNow) / 1_000));
   const revealed = room.quiz.status === "reveal";
   const answerLocked = submitted || revealed || room.quiz.status !== "question" || seconds === 0;
   const answeredCorrectly = revealed && selected !== null && selected === room.quiz.revealedCorrectOptionId;

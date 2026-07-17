@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   createOpenAIQuizModelPort,
+  estimatedTextCostUsd,
   QuizModelFailure,
   type ModelQuizCandidate,
   type ModelQuizReview
@@ -63,8 +64,15 @@ describe(`real OpenAI quiz generation: ${liveCaseName}`, () => {
     try {
       const evidence = await model.discover(request, AbortSignal.timeout(120_000));
       evidenceUsage = evidence.usage;
-      candidate = await model.generate(request, evidence, AbortSignal.timeout(120_000));
-      review = await model.review(candidate, request, AbortSignal.timeout(30_000));
+      const generation = await model.generate(request, evidence, AbortSignal.timeout(120_000));
+      candidate = generation.value;
+      const reviewStage = await model.review(candidate, evidence, request, AbortSignal.timeout(30_000));
+      review = reviewStage.value;
+      evidenceUsage = {
+        inputTokens: evidenceUsage.inputTokens + generation.usage.inputTokens + reviewStage.usage.inputTokens,
+        outputTokens: evidenceUsage.outputTokens + generation.usage.outputTokens + reviewStage.usage.outputTokens,
+        searchCalls: evidenceUsage.searchCalls
+      };
     } catch (error) {
       const provider = error instanceof QuizModelFailure && error.cause instanceof Error ? error.cause : error;
       console.error(JSON.stringify({
@@ -81,13 +89,11 @@ describe(`real OpenAI quiz generation: ${liveCaseName}`, () => {
       : validateGeneratedCandidate(selection.candidate, selection.review, request.configuration, now, 3_600_000, "generated:01JZ8V7Y8TQ5B7MT3Y94K6Y8V2");
 
     const usage = {
-      inputTokens: evidenceUsage.inputTokens + (candidate.usage?.inputTokens ?? 0) + (review.usage?.inputTokens ?? 0),
-      outputTokens: evidenceUsage.outputTokens + (candidate.usage?.outputTokens ?? 0) + (review.usage?.outputTokens ?? 0),
+      inputTokens: evidenceUsage.inputTokens,
+      outputTokens: evidenceUsage.outputTokens,
       searchCalls: evidenceUsage.searchCalls
     };
-    const estimatedCostUsd = usage.inputTokens * 0.75 / 1_000_000
-      + usage.outputTokens * 4.5 / 1_000_000
-      + usage.searchCalls * 0.01;
+    const estimatedCostUsd = estimatedTextCostUsd(usage) + usage.searchCalls * 0.01;
     console.warn(JSON.stringify({
       estimatedCostUsd: Number(estimatedCostUsd.toFixed(4)),
       liveCase: liveCaseName,

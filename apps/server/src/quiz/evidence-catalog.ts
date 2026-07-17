@@ -43,7 +43,8 @@ export function createEvidenceCatalog(sources: readonly ProviderEvidenceSource[]
   for (const source of sources) {
     const url = canonicalSourceUrl(source.url);
     if (url === undefined || unique.has(url)) continue;
-    const publisher = new URL(url).hostname.toLocaleLowerCase("en").replace(/^www\./u, "");
+    const publisher = httpsHostname(url);
+    if (publisher === undefined) continue;
     unique.set(url, {
       publisher,
       title: source.title?.trim() || publisher,
@@ -78,4 +79,5 @@ export function resolveEvidenceReferences(
   }
   return resolved;
 }
+import { httpsHostname } from "./evidence-policy.js";
 import type { ModelEvidenceSource } from "./types.js";

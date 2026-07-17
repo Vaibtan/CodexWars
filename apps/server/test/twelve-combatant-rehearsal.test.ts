@@ -1,8 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { boot, ColyseusTestServer } from "@colyseus/testing";
 import type { Room as ClientRoom } from "@colyseus/sdk";
-import appConfig from "../src/app.config.js";
-import { setWarRoomDependenciesForTest } from "../src/rooms/war-room.js";
+import { createAppConfig } from "../src/app.config.js";
 import { WarRoomHarness } from "./support/war-room-harness.js";
 
 const PARTICIPANT_COUNT = 12;
@@ -11,9 +10,10 @@ const POSITION_RADIUS_M = 3.9;
 
 let colyseus: ColyseusTestServer;
 let deterministicResult: string | undefined;
+let now = 0;
 
 beforeAll(async () => {
-  colyseus = await boot(appConfig);
+  colyseus = await boot(createAppConfig({ log: () => undefined, now: () => now }));
 });
 
 afterAll(async () => {
@@ -32,10 +32,8 @@ function ringPositions(): readonly { readonly x: number; readonly z: number }[] 
 }
 
 describe("twelve-combatant backend rehearsal", () => {
-  it.each([1, 2])("completes a deterministic maximum-rate battle run %i", async (run) => {
-    let now = 50_000;
-    const restoreDependencies = setWarRoomDependenciesForTest({ log: () => undefined, now: () => now });
-    try {
+  it.each([1, 2])("completes a deterministic maximum-rate battle run %i", async (_run) => {
+    now = 50_000;
       const harness = await WarRoomHarness.create(colyseus);
       const participants: ClientRoom[] = [];
       for (let index = 0; index < PARTICIPANT_COUNT; index += 1) {
@@ -120,8 +118,5 @@ describe("twelve-combatant backend rehearsal", () => {
       });
       if (deterministicResult === undefined) deterministicResult = result;
       else expect(result).toBe(deterministicResult);
-    } finally {
-      restoreDependencies();
-    }
   }, 15_000);
 });

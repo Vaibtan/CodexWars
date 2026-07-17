@@ -1,4 +1,4 @@
-import type { ArenaPosition, CharacterSelection } from "../features/characters/types";
+import type { ArenaPosition, CharacterSelection } from "@codexwars/shared";
 import type { MarkerSpacePose } from "./coordinates";
 
 export type ArFlowPhase = "marker-scan" | "organizer-lobby" | "battle";

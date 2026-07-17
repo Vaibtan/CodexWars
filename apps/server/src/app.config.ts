@@ -1,12 +1,13 @@
 import { defineRoom, defineServer } from "@colyseus/core";
 import { registerOperationalRoutes, type OperationalApplication } from "./operational.js";
-import { WarRoom } from "./rooms/war-room.js";
+import { createWarRoomClass, type WarRoomDependencies } from "./rooms/war-room.js";
 import { serverConfig } from "./config.js";
 import { registerMatchmakingAdmission } from "./matchmaking-admission.js";
-import { productionAdmission } from "./runtime-services.js";
+import { productionAdmission, productionWarRoomDependencies } from "./runtime-services.js";
 
-export function createAppConfig() {
+export function createAppConfig(overrides: Partial<WarRoomDependencies> = {}) {
   let roomsRegistered = false;
+  const warRoom = createWarRoomClass({ ...productionWarRoomDependencies, ...overrides });
   return defineServer({
     beforeListen: () => {
       roomsRegistered = true;
@@ -16,7 +17,7 @@ export function createAppConfig() {
       registerOperationalRoutes(app, () => roomsRegistered, serverConfig.generation.capability);
     },
     rooms: {
-      war: defineRoom(WarRoom)
+      war: defineRoom(warRoom)
     }
   });
 }

@@ -1,7 +1,7 @@
 # CodexWars Backend TODO
 
 **Status:** Complete
-**Last reviewed:** 2026-07-16
+**Last reviewed:** 2026-07-17
 **Scope:** Completion record for the P0 backend correctness, coverage, and release-readiness work.
 
 This file is an implementation tracker, not a product or protocol specification. Product behavior and wire contracts remain authoritative in:
@@ -24,7 +24,7 @@ The backend already implements the main P0 loop:
 - State privacy controls, payload limits, rate limits, and command deduplication
 - Health and readiness endpoints
 
-The completed P0 gate passes 62 server tests, 19 shared-package tests, 15 mobile unit tests, 9 mobile native-identity tests, and strict TypeScript checks for every workspace. The checklist below records the implemented and verified closure of the original correctness, coverage, and readiness gaps.
+The current deterministic gate passes 95 server tests, 20 shared-package tests, 21 mobile unit tests, 9 mobile native-identity tests, and strict TypeScript checks for every workspace. The checklist below records the implemented and verified closure of the original correctness, coverage, and readiness gaps; later quiz-preparation and architecture work account for the larger suite.
 
 ## Execution order
 

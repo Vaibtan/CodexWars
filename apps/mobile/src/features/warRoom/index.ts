@@ -1,5 +1,4 @@
 export {
-  type WarRoomIntent,
   type WarRoomRealtimeClient,
   type WarRoomSnapshot,
 } from "./realtimeClient";

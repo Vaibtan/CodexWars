@@ -1,4 +1,4 @@
-import type { QuizFallbackReason } from "./types.js";
+import type { ModelUsage, QuizFallbackReason } from "./types.js";
 
 export type QuizPreparationOutcome = "cancelled" | "generated" | QuizFallbackReason;
 
@@ -23,6 +23,10 @@ export interface QuizTelemetrySnapshot {
 export interface QuizTelemetry {
   record(entry: QuizTelemetryEntry): void;
   snapshot(): QuizTelemetrySnapshot;
+}
+
+export function estimatedTextCostUsd(usage: Pick<ModelUsage, "inputTokens" | "outputTokens">): number {
+  return (usage.inputTokens * 0.75 + usage.outputTokens * 4.5) / 1_000_000;
 }
 
 export function createQuizTelemetry(): QuizTelemetry {
@@ -50,7 +54,7 @@ export function createQuizTelemetry(): QuizTelemetry {
       return {
         attempts,
         durationMs: { count: durationCount, max: durationMax, sum: durationSum },
-        estimatedTextCostUsd: (inputTokens * 0.75 + outputTokens * 4.5) / 1_000_000,
+        estimatedTextCostUsd: estimatedTextCostUsd({ inputTokens, outputTokens }),
         inputTokens,
         outcomes: Object.fromEntries([...outcomes].sort(([left], [right]) => left.localeCompare(right))),
         outputTokens,

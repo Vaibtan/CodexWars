@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import type { PublicRoomState } from "@codexwars/shared";
+import type { ArenaPosition, CharacterSelection, PublicRoomState } from "@codexwars/shared";
 import { BattleStatsPanel } from "../components/BattleStatsPanel";
 import { CharacterPreview } from "../components/CharacterPreview";
 import { colors } from "../components/theme";
+import { markerTrackingDecision } from "../ar/markerTrackingPolicy";
 import type { ArMarkerTrackingState, ArTrackingState } from "../ar/types";
 import { getCharacter, getCharacterColor } from "../features/characters/characterCatalog";
-import type { ArenaPosition, CharacterSelection } from "../features/characters/types";
 import type { WarRoomRealtimeClient } from "../features/warRoom/realtimeClient";
 
 type ParticipantPlacementScreenProps = {
@@ -20,13 +20,6 @@ type ParticipantPlacementScreenProps = {
   room: PublicRoomState;
   selection: CharacterSelection;
   tracking: ArTrackingState;
-};
-
-const trackingCopy: Record<ArTrackingState, string> = {
-  initializing: "Starting camera…",
-  limited: "Move slowly and keep the floor visible",
-  normal: "Floor tracking stable",
-  unavailable: "Tracking unavailable",
 };
 
 export function ParticipantPlacementScreen({
@@ -45,6 +38,7 @@ export function ParticipantPlacementScreen({
   const character = getCharacter(selection.characterId);
   const characterColor = getCharacterColor(selection.colorId);
   const player = client.session.playerId === null ? undefined : room.players[client.session.playerId];
+  const markerDecision = markerTrackingDecision("positioning", markerTracking, tracking);
 
   useEffect(() => {
     if (room.phase === "battle") onStartBattle();
@@ -56,25 +50,21 @@ export function ParticipantPlacementScreen({
 
   useEffect(() => {
     if (!player || (room.phase !== "localization" && room.phase !== "positioning")) return;
-    const desiredLocalization = markerTracking === "tracked" || markerTracking === "degraded"
-      ? "localized"
-      : markerTracking === "lost"
-        ? "lost"
-        : "searching";
+    const desiredLocalization = markerDecision.localization;
     if (player.localization === desiredLocalization) return;
-    void client.send({ state: desiredLocalization, type: "localization_changed" }).catch((error: unknown) => {
+    void client.send("localization_changed", { state: desiredLocalization }).catch((error: unknown) => {
       setSyncError(error instanceof Error ? error.message : String(error));
     });
-  }, [client, markerTracking, player, room.phase]);
+  }, [client, markerDecision.localization, player, room.phase]);
 
   const joinBattle = async () => {
-    if (!position || tracking !== "normal") {
+    if (!position || !markerDecision.canLock) {
       return;
     }
     setSyncError(null);
     try {
-      await client.send({ position, type: "lock_position" });
-      await client.send({ ready: true, type: "ready_changed" });
+      await client.send("lock_position", position);
+      await client.send("ready_changed", { ready: true });
     } catch (error) {
       setSyncError(error instanceof Error ? error.message : String(error));
     }
@@ -128,8 +118,7 @@ export function ParticipantPlacementScreen({
   const selectionSynced = player?.characterId === selection.characterId
     && player.characterColorId === selection.colorId;
   const canJoin = Boolean(position)
-    && tracking === "normal"
-    && markerTracking === "tracked"
+    && markerDecision.canLock
     && selectionSynced
     && room.arena.configured
     && room.phase === "positioning";
@@ -148,7 +137,7 @@ export function ParticipantPlacementScreen({
           <View style={styles.trackingPill}>
             <View style={[styles.trackingDot, tracking === "normal" && styles.trackingDotReady]} />
             <Text numberOfLines={1} style={styles.trackingText}>
-              {markerTracking === "tracked" ? "Arena marker locked" : markerTracking === "degraded" ? "Marker pose retained" : markerTracking === "lost" ? "Marker lost · scan again" : trackingCopy[tracking]}
+              {markerDecision.label}
             </Text>
           </View>
           <Text style={styles.stepPill}>2 of 2</Text>
@@ -202,7 +191,6 @@ export function ParticipantPlacementScreen({
 }
 
 const styles = StyleSheet.create({
-  screen: { backgroundColor: colors.background, flex: 1 },
   overlay: { ...StyleSheet.absoluteFillObject },
   topBar: { alignItems: "center", flexDirection: "row", gap: 10, paddingHorizontal: 14, paddingTop: 8 },
   cameraButton: { alignItems: "center", backgroundColor: colors.cameraScrim, borderRadius: 999, height: 48, justifyContent: "center", width: 48 },
@@ -249,8 +237,6 @@ const styles = StyleSheet.create({
   waitingHint: { color: colors.inkMuted, fontSize: 12, lineHeight: 18, marginBottom: 12, textAlign: "center" },
   syncError: { color: colors.danger, fontSize: 12, marginTop: 8, textAlign: "center" },
   secondaryButton: { alignItems: "center", borderColor: colors.outline, borderRadius: 14, borderWidth: 1, justifyContent: "center", minHeight: 54 },
-  startButton: { alignItems: "center", backgroundColor: colors.accent, borderRadius: 14, justifyContent: "center", marginBottom: 10, minHeight: 56, paddingHorizontal: 16 },
-  startButtonText: { color: colors.accentInk, fontSize: 16, fontWeight: "900", textAlign: "center" },
   secondaryButtonText: { color: colors.ink, fontSize: 15, fontWeight: "800" },
   pressed: { opacity: 0.8, transform: [{ scale: 0.98 }] },
 });

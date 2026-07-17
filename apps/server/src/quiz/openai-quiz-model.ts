@@ -3,8 +3,9 @@ import { APICallError, NoObjectGeneratedError, NoOutputGeneratedError, Output, g
 import { z } from "zod";
 import { QUIZ } from "@codexwars/shared";
 import { createEvidenceCatalog, resolveEvidenceReferences, type EvidenceCatalog } from "./evidence-catalog.js";
-import { generatedQuestionKind, materializeGeneratedAnswer, TRUSTED_SOURCE_DOMAINS } from "./quality.js";
-import { QuizModelFailure, type ModelEvidence, type ModelQuizCandidate, type ModelQuizReview, type QuizModelPort, type QuizModelRequest, type QuizReviewIssueCode } from "./types.js";
+import { TRUSTED_SOURCE_DOMAINS } from "./evidence-policy.js";
+import { generatedQuestionKind, materializeGeneratedAnswer } from "./quality.js";
+import { QuizModelFailure, type ModelEvidence, type ModelQuizCandidate, type QuizModelPort, type QuizModelRequest, type QuizReviewIssueCode } from "./types.js";
 
 const MODEL = "gpt-5.4-mini-2026-03-17";
 const MODEL_QUESTION_COUNT = 16;
@@ -211,7 +212,7 @@ function generationPrompt(request: QuizModelRequest, evidenceBrief: string, cata
   ].join("\n");
 }
 
-function reviewPrompt(candidate: ModelQuizCandidate, request: QuizModelRequest): string {
+function reviewPrompt(candidate: ModelQuizCandidate, evidence: ModelEvidence, request: QuizModelRequest): string {
   return [
     "Review this proposed classroom quiz independently and return strict structured data.",
     `Current UTC time: ${new Date(request.now).toISOString()}.`,
@@ -220,7 +221,7 @@ function reviewPrompt(candidate: ModelQuizCandidate, request: QuizModelRequest):
     `Use only these issue codes: ${REVIEW_ISSUE_CODES.join(", ")}.`,
     "Set approved=true only if every boolean for every question is true and every issues array is empty.",
     JSON.stringify({
-      evidenceBrief: candidate.reviewContext?.evidenceBrief ?? "",
+      evidenceBrief: evidence.brief,
       quiz: { questions: candidate.questions, title: candidate.title }
     })
   ].join("\n");
@@ -308,25 +309,23 @@ export function createOpenAIQuizModelPort(options: {
           };
         });
         return {
-          questions,
-          reviewContext: { evidenceBrief: evidence.brief },
-          title: output.title,
           usage: {
             inputTokens: response.usage.inputTokens,
             outputTokens: response.usage.outputTokens,
             searchCalls: 0
-          }
+          },
+          value: { questions, title: output.title }
         };
       } catch (error) {
         throw normalizedFailure(error);
       }
     },
 
-    async review(candidate, request, signal) {
+    async review(candidate, evidence, request, signal) {
       try {
-        const response = await providerStage("review", () => aiSdk.review(reviewPrompt(candidate, request), signal));
+        const response = await providerStage("review", () => aiSdk.review(reviewPrompt(candidate, evidence, request), signal));
         const output = reviewSchema.parse(response.output);
-        return { ...output, usage: response.usage };
+        return { usage: response.usage, value: output };
       } catch (error) {
         throw normalizedFailure(error);
       }

@@ -1,5 +1,5 @@
 import type { ImageSourcePropType } from "react-native";
-import type { CharacterColorId, CharacterId } from "./types";
+import type { CharacterColorId, CharacterId } from "@codexwars/shared";
 
 export type CharacterDefinition = {
   id: CharacterId;

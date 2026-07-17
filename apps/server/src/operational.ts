@@ -1,13 +1,7 @@
-import { createServer, type Server, type ServerResponse } from "node:http";
 import { PROTOCOL_VERSION } from "@codexwars/shared";
 import type { GenerationCapability } from "./config.js";
 
 const SERVICE_NAME = "codexwars-server";
-
-export interface OperationalDependencies {
-  readonly generationCapability: GenerationCapability;
-  readonly isReady: () => boolean;
-}
 
 export interface OperationalResponse {
   readonly protocolVersion: typeof PROTOCOL_VERSION;
@@ -54,17 +48,5 @@ export function registerOperationalRoutes(app: OperationalApplication, isReady: 
   app.use((_request, response) => {
     const resolved = operationalResponse(undefined, undefined, isReady, generationCapability);
     response.status(resolved.statusCode).json(resolved.body);
-  });
-}
-
-function writeJson(response: ServerResponse, statusCode: number, body: OperationalResponse | { readonly code: "NOT_FOUND"; readonly message: "Route not found" }): void {
-  response.writeHead(statusCode, { "content-type": "application/json; charset=utf-8" });
-  response.end(JSON.stringify(body));
-}
-
-export function createOperationalServer(dependencies: OperationalDependencies): Server {
-  return createServer((request, response) => {
-    const resolved = operationalResponse(request.method, request.url, dependencies.isReady, dependencies.generationCapability);
-    writeJson(response, resolved.statusCode, resolved.body);
   });
 }

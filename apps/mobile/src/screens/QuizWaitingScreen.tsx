@@ -56,8 +56,6 @@ const styles = StyleSheet.create({
   readyText: { color: colors.success },
   readyButton: { alignItems: "center", backgroundColor: colors.accent, borderRadius: 14, justifyContent: "center", marginTop: 16, minHeight: 56 },
   readyButtonText: { color: colors.ink, fontSize: 15, fontWeight: "900" },
-  disabled: { opacity: 0.45 },
-  error: { color: colors.danger, fontSize: 13, marginTop: 12, textAlign: "center" },
   leaveButton: { alignItems: "center", borderColor: colors.outline, borderRadius: 14, borderWidth: 1, justifyContent: "center", marginBottom: 12, minHeight: 54 },
   leaveText: { color: colors.ink, fontSize: 15, fontWeight: "800" },
 });

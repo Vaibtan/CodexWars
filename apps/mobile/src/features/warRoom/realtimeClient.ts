@@ -1,14 +1,12 @@
 import {
   PROTOCOL_VERSION,
+  commandEnvelope,
   isClientEventPayload,
   isPublicRoomStateProjection,
-  type CharacterSelection,
   type ClientEventPayloads,
-  type CommandEnvelope,
-  type LocalizationState,
-  type PlayerId,
+  type CommandName,
+  type CommandPayloads,
   type PublicRoomState,
-  type QuizConfiguration,
 } from "@codexwars/shared";
 import { WarRoomCommandError } from "./errors";
 import type { WarRoomRole, WarRoomSession } from "./types";
@@ -16,25 +14,6 @@ import type { WarRoomRole, WarRoomSession } from "./types";
 export { WarRoomCommandError, type WarRoomErrorCode } from "./errors";
 
 export type Unsubscribe = () => void;
-
-export type WarRoomIntent =
-  | { readonly included: boolean; readonly playerId: PlayerId; readonly type: "set_combat_included" }
-  | { readonly radiusM: number; readonly type: "configure_arena" }
-  | ({ readonly type: "configure_quiz" } & QuizConfiguration)
-  | { readonly type: "prepare_quiz" }
-  | { readonly type: "regenerate_quiz" }
-  | { readonly type: "cancel_quiz_preparation" }
-  | { readonly type: "approve_quiz" }
-  | { readonly type: "start_quiz" }
-  | { readonly selection: CharacterSelection; readonly type: "select_character" }
-  | { readonly optionId: string; readonly questionId: string; readonly type: "quiz_answer" }
-  | { readonly state: Extract<LocalizationState, "localized" | "lost" | "searching">; readonly type: "localization_changed" }
-  | { readonly position: { readonly x: number; readonly z: number }; readonly type: "lock_position" }
-  | { readonly type: "unlock_position" }
-  | { readonly ready: boolean; readonly type: "ready_changed" }
-  | { readonly type: "start_battle" }
-  | { readonly dirX: number; readonly dirZ: number; readonly predictedTargetId?: PlayerId; readonly type: "attack" }
-  | { readonly type: "reset_round" };
 
 export type WarRoomCommandReceipt = ClientEventPayloads["command_accepted"];
 
@@ -51,7 +30,7 @@ export interface WarRoomRealtimeClient {
   readonly session: WarRoomSession;
   dispose(): Promise<void>;
   getSnapshot(): WarRoomSnapshot;
-  send(intent: WarRoomIntent): Promise<WarRoomCommandReceipt>;
+  send<Name extends CommandName>(name: Name, payload: CommandPayloads[Name]): Promise<WarRoomCommandReceipt>;
   subscribe(listener: (snapshot: WarRoomSnapshot) => void): Unsubscribe;
 }
 
@@ -133,14 +112,14 @@ class ColyseusWarRoomClient implements WarRoomRealtimeClient {
     return () => this.listeners.delete(listener);
   }
 
-  send(intent: WarRoomIntent): Promise<WarRoomCommandReceipt> {
+  send<Name extends CommandName>(name: Name, command: CommandPayloads[Name]): Promise<WarRoomCommandReceipt> {
     if (this.disposed) return Promise.reject(new Error("War Room session is closed."));
     const room = this.snapshot.room;
     if (room === null) return Promise.reject(new Error("War Room state has not loaded yet."));
     if (!this.snapshot.connected) return Promise.reject(new Error("War Room is reconnecting. Try again in a moment."));
 
     const commandId = createCommandId();
-    const { name, payload } = commandPayload(intent, commandId, room.roundId);
+    const { payload } = commandEnvelope(name, command, { commandId, roundId: room.roundId });
     const outcome = new Promise<WarRoomCommandReceipt>((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pendingCommands.delete(commandId);
@@ -276,34 +255,6 @@ async function requestSessionIdentity(
     }, timeoutMs);
     transport.send("request_session", { protocolVersion: PROTOCOL_VERSION });
   });
-}
-
-function commandPayload(
-  intent: WarRoomIntent,
-  commandId: string,
-  roundId: number,
-): CommandEnvelope {
-  const meta = { commandId, roundId };
-  switch (intent.type) {
-    case "set_combat_included": return { name: intent.type, payload: { ...meta, included: intent.included, playerId: intent.playerId } };
-    case "configure_arena": return { name: intent.type, payload: { ...meta, radiusM: intent.radiusM } };
-    case "configure_quiz": return { name: intent.type, payload: { ...meta, category: intent.category, contentMode: intent.contentMode, currentEventsLookbackDays: intent.currentEventsLookbackDays, difficultyProfile: intent.difficultyProfile } };
-    case "approve_quiz":
-    case "cancel_quiz_preparation":
-    case "prepare_quiz":
-    case "regenerate_quiz":
-    case "start_quiz":
-    case "unlock_position":
-    case "start_battle":
-    case "reset_round":
-      return { name: intent.type, payload: meta };
-    case "select_character": return { name: intent.type, payload: { ...meta, characterId: intent.selection.characterId, colorId: intent.selection.colorId } };
-    case "quiz_answer": return { name: intent.type, payload: { ...meta, optionId: intent.optionId, questionId: intent.questionId } };
-    case "localization_changed": return { name: intent.type, payload: { ...meta, state: intent.state } };
-    case "lock_position": return { name: intent.type, payload: { ...meta, x: intent.position.x, z: intent.position.z } };
-    case "ready_changed": return { name: intent.type, payload: { ...meta, ready: intent.ready } };
-    case "attack": return { name: intent.type, payload: { ...meta, dirX: intent.dirX, dirZ: intent.dirZ, ...(intent.predictedTargetId === undefined ? {} : { predictedTargetId: intent.predictedTargetId }), weaponId: "bolt" } };
-  }
 }
 
 function createCommandId(): string {

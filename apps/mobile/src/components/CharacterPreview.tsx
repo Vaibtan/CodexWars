@@ -1,6 +1,6 @@
 import { StyleSheet, Text, View } from "react-native";
 import { colors } from "./theme";
-import type { CharacterColorId, CharacterId } from "../features/characters/types";
+import type { CharacterColorId, CharacterId } from "@codexwars/shared";
 import { getCharacterColor } from "../features/characters/characterCatalog";
 
 type CharacterPreviewProps = {

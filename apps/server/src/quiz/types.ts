@@ -58,9 +58,7 @@ export type QuizReviewIssueCode =
 
 export interface ModelQuizCandidate {
   readonly questions: readonly ModelQuizQuestion[];
-  readonly reviewContext?: { readonly evidenceBrief: string };
   readonly title: string;
-  readonly usage?: ModelUsage;
 }
 
 export interface ModelQuestionReview {
@@ -77,7 +75,11 @@ export interface ModelQuestionReview {
 export interface ModelQuizReview {
   readonly approved: boolean;
   readonly questions: readonly ModelQuestionReview[];
-  readonly usage?: Omit<ModelUsage, "searchCalls">;
+}
+
+export interface ModelStageResult<T, Usage = ModelUsage> {
+  readonly usage: Usage;
+  readonly value: T;
 }
 
 export interface QuizModelRequest {
@@ -89,8 +91,8 @@ export interface QuizModelRequest {
 
 export interface QuizModelPort {
   discover(request: QuizModelRequest, signal: AbortSignal): Promise<ModelEvidence>;
-  generate(request: QuizModelRequest, evidence: ModelEvidence, signal: AbortSignal): Promise<ModelQuizCandidate>;
-  review(candidate: ModelQuizCandidate, request: QuizModelRequest, signal: AbortSignal): Promise<ModelQuizReview>;
+  generate(request: QuizModelRequest, evidence: ModelEvidence, signal: AbortSignal): Promise<ModelStageResult<ModelQuizCandidate>>;
+  review(candidate: ModelQuizCandidate, evidence: ModelEvidence, request: QuizModelRequest, signal: AbortSignal): Promise<ModelStageResult<ModelQuizReview, Omit<ModelUsage, "searchCalls">>>;
 }
 
 export interface QuizPreparationRequest {

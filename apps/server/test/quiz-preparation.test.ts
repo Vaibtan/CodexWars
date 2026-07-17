@@ -42,8 +42,7 @@ function candidate(): ModelQuizCandidate {
         sources: [{ publisher: "nasa.gov", retrievedAt: NOW, title: "NASA reference", url: `https://www.nasa.gov/reference/science-${index + 1}` }]
       };
     }),
-    title: "Verified science",
-    usage: { inputTokens: 200, outputTokens: 100, searchCalls: 0 }
+    title: "Verified science"
   };
 }
 
@@ -59,12 +58,19 @@ function approvedReview(): ModelQuizReview {
       order: index + 1,
       stableForRoom: true,
       unambiguous: true
-    })),
-    usage: { inputTokens: 80, outputTokens: 40 }
+    }))
   };
 }
 
-function preparation(model: QuizModelPort, options: { readonly dailySearchLimit?: number; readonly now?: () => number } = {}) {
+function generatedCandidate() {
+  return { usage: { inputTokens: 200, outputTokens: 100, searchCalls: 0 }, value: candidate() };
+}
+
+function reviewedCandidate() {
+  return { usage: { inputTokens: 80, outputTokens: 40 }, value: approvedReview() };
+}
+
+function preparation(model: QuizModelPort, options: { readonly dailySearchLimit?: number; readonly deadlineMs?: number; readonly now?: () => number } = {}) {
   let id = 0;
   return createQuizPreparation({
     governor: createGenerationGovernor({ dailyGenerationLimit: 20, dailySearchLimit: options.dailySearchLimit ?? 20, maxConcurrent: 4 }),
@@ -72,7 +78,7 @@ function preparation(model: QuizModelPort, options: { readonly dailySearchLimit?
     model,
     now: options.now ?? (() => NOW),
     policy: {
-      deadlineMs: 10_000,
+      deadlineMs: options.deadlineMs ?? 10_000,
       developingStoryCutoffMs: 3_600_000,
       evidenceCacheMaxEntries: 8,
       evidenceCacheTtlMs: 60_000,
@@ -90,11 +96,12 @@ describe("Quiz Preparation", () => {
     const discover = vi.fn<QuizModelPort["discover"]>().mockResolvedValue(evidence());
     const generate = vi.fn<QuizModelPort["generate"]>()
       .mockRejectedValueOnce(new QuizModelFailure("rate_limited", true))
-      .mockResolvedValue(candidate());
+      .mockResolvedValue(generatedCandidate());
+    const review = vi.fn<QuizModelPort["review"]>().mockResolvedValue(reviewedCandidate());
     const model: QuizModelPort = {
       discover,
       generate,
-      review: vi.fn<QuizModelPort["review"]>().mockResolvedValue(approvedReview())
+      review
     };
 
     const result = await preparation(model).prepare(request(), new AbortController().signal);
@@ -103,15 +110,21 @@ describe("Quiz Preparation", () => {
     expect(result.provenance.usage).toEqual({ inputTokens: 380, outputTokens: 180, searchCalls: 1 });
     expect(discover).toHaveBeenCalledOnce();
     expect(generate).toHaveBeenCalledTimes(2);
+    expect(review).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Verified science" }),
+      expect.objectContaining({ brief: "A server-owned evidence brief containing stable science facts." }),
+      expect.objectContaining({ roomId: "room-one" }),
+      expect.any(AbortSignal)
+    );
   });
 
   it("reuses fresh evidence while producing a distinct Quiz Template for each preparation", async () => {
     const discover = vi.fn<QuizModelPort["discover"]>().mockResolvedValue(evidence());
-    const generate = vi.fn<QuizModelPort["generate"]>().mockResolvedValue(candidate());
+    const generate = vi.fn<QuizModelPort["generate"]>().mockResolvedValue(generatedCandidate());
     const model: QuizModelPort = {
       discover,
       generate,
-      review: vi.fn<QuizModelPort["review"]>().mockResolvedValue(approvedReview())
+      review: vi.fn<QuizModelPort["review"]>().mockResolvedValue(reviewedCandidate())
     };
     const quizPreparation = preparation(model);
 
@@ -129,8 +142,8 @@ describe("Quiz Preparation", () => {
     const discover = vi.fn<QuizModelPort["discover"]>().mockResolvedValue(evidence());
     const model: QuizModelPort = {
       discover,
-      generate: vi.fn<QuizModelPort["generate"]>().mockResolvedValue(candidate()),
-      review: vi.fn<QuizModelPort["review"]>().mockResolvedValue(approvedReview())
+      generate: vi.fn<QuizModelPort["generate"]>().mockResolvedValue(generatedCandidate()),
+      review: vi.fn<QuizModelPort["review"]>().mockResolvedValue(reviewedCandidate())
     };
     const quizPreparation = preparation(model, { dailySearchLimit: 1 });
 
@@ -146,11 +159,11 @@ describe("Quiz Preparation", () => {
     let resolveEvidence!: (value: ModelEvidence) => void;
     const pendingEvidence = new Promise<ModelEvidence>((resolve) => { resolveEvidence = resolve; });
     const discover = vi.fn<QuizModelPort["discover"]>().mockReturnValue(pendingEvidence);
-    const generate = vi.fn<QuizModelPort["generate"]>().mockResolvedValue(candidate());
+    const generate = vi.fn<QuizModelPort["generate"]>().mockResolvedValue(generatedCandidate());
     const model: QuizModelPort = {
       discover,
       generate,
-      review: vi.fn<QuizModelPort["review"]>().mockResolvedValue(approvedReview())
+      review: vi.fn<QuizModelPort["review"]>().mockResolvedValue(reviewedCandidate())
     };
     const quizPreparation = preparation(model);
 
@@ -202,8 +215,8 @@ describe("Quiz Preparation", () => {
     const discover = vi.fn<QuizModelPort["discover"]>().mockImplementation(async () => ({ ...evidence(), retrievedAt: now }));
     const model: QuizModelPort = {
       discover,
-      generate: vi.fn<QuizModelPort["generate"]>().mockResolvedValue(candidate()),
-      review: vi.fn<QuizModelPort["review"]>().mockResolvedValue(approvedReview())
+      generate: vi.fn<QuizModelPort["generate"]>().mockResolvedValue(generatedCandidate()),
+      review: vi.fn<QuizModelPort["review"]>().mockResolvedValue(reviewedCandidate())
     };
     const quizPreparation = preparation(model, { now: () => now });
 
@@ -219,8 +232,8 @@ describe("Quiz Preparation", () => {
     const pendingEvidence = new Promise<ModelEvidence>((resolve) => { resolveEvidence = resolve; });
     const model: QuizModelPort = {
       discover: vi.fn<QuizModelPort["discover"]>().mockReturnValue(pendingEvidence),
-      generate: vi.fn<QuizModelPort["generate"]>().mockResolvedValue(candidate()),
-      review: vi.fn<QuizModelPort["review"]>().mockResolvedValue(approvedReview())
+      generate: vi.fn<QuizModelPort["generate"]>().mockResolvedValue(generatedCandidate()),
+      review: vi.fn<QuizModelPort["review"]>().mockResolvedValue(reviewedCandidate())
     };
     const quizPreparation = preparation(model);
     const firstController = new AbortController();
@@ -234,5 +247,31 @@ describe("Quiz Preparation", () => {
 
     expect(first).toBeInstanceOf(Error);
     expect(second.source).toBe("generated");
+    expect(second.provenance.usage.searchCalls).toBe(1);
+  });
+
+  it("starts a fresh evidence lookup after every subscriber cancels", async () => {
+    const discover = vi.fn<QuizModelPort["discover"]>()
+      .mockImplementationOnce(() => new Promise<ModelEvidence>(() => undefined))
+      .mockResolvedValueOnce(evidence());
+    const model: QuizModelPort = {
+      discover,
+      generate: vi.fn<QuizModelPort["generate"]>().mockResolvedValue(generatedCandidate()),
+      review: vi.fn<QuizModelPort["review"]>().mockResolvedValue(reviewedCandidate())
+    };
+    const quizPreparation = preparation(model, { deadlineMs: 25 });
+    const firstController = new AbortController();
+    const secondController = new AbortController();
+    const firstPending = quizPreparation.prepare(request("room-one" as RoomId), firstController.signal).catch((error: unknown) => error);
+    const secondPending = quizPreparation.prepare(request("room-two" as RoomId), secondController.signal).catch((error: unknown) => error);
+    await Promise.resolve();
+
+    firstController.abort();
+    secondController.abort();
+    await Promise.all([firstPending, secondPending]);
+    const third = await quizPreparation.prepare(request("room-three" as RoomId), new AbortController().signal);
+
+    expect(third.source).toBe("generated");
+    expect(discover).toHaveBeenCalledTimes(2);
   });
 });

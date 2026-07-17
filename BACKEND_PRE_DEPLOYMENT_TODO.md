@@ -216,7 +216,7 @@ Public hosting makes room creation and model-backed generation a billable attack
 
 ## PD-9: Configuration and operational readiness
 
-- [x] Add one typed server configuration module for port, generation feature flag, model snapshot, timeouts, retry limit, concurrency, regeneration allowance, source policy, and budgets.
+- [x] Add one typed server configuration module for port, generation feature flag, model snapshot, timeouts, retry limit, concurrency, regeneration allowance, and budgets. Keep the reviewed trusted-source allow-list as a typed quiz-quality policy shared by provider search, validation, and evidence-cache keying.
 - [x] Validate configuration once at startup and fail clearly only for unsafe/invalid configuration; a missing OpenAI key disables generation and retains fallback readiness.
 - [x] Extend readiness metadata with generation capability state without calling OpenAI from a health probe or making fallback-capable readiness depend on OpenAI availability.
 - [x] Add redacted structured logs for preparation requested, generated, rejected by validation, fallback selected, cancelled, timed out, and budget exhausted.
@@ -252,6 +252,8 @@ Follow TDD through the public module and room interfaces. CI must not spend mone
 - [ ] Full round completion with a quiz produced through the real OpenAI adapter.
 
 ### Evaluation and live verification
+
+The per-case `$0.07`/`$0.08` limits in the live command are hard spend-safety ceilings, not the rollout acceptance threshold. Final acceptance still uses `QUIZ_EVALUATION_THRESHOLDS`: estimated cost at most `$0.05` and latency p95 at most `20,000 ms`, evaluated from the aggregate live sample. A live command pass alone therefore does not close the cost or latency gate.
 
 - [x] Create a versioned evaluation set covering every allowed category, difficulty profile, and content mode.
 - [x] Define measurable acceptance thresholds for factual correctness, ambiguity, source quality, category balance, unsafe-content rate, latency, fallback rate, and estimated cost before live rollout.

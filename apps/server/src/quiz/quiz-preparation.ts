@@ -1,12 +1,14 @@
 import { GENERAL_KNOWLEDGE_FALLBACK_V1, validateQuizTemplate } from "@codexwars/shared";
-import type { GenerationGovernor, GenerationPermit } from "./governor.js";
-import { selectPlayableCandidate, TRUSTED_SOURCE_DOMAINS, validateGeneratedCandidate } from "./quality.js";
-import { QuizModelFailure, QuizPreparationCancelledError, type ModelEvidence, type ModelUsage, type PreparedQuiz, type QuizFallbackReason, type QuizModelPort, type QuizModelRequest, type QuizPreparation, type QuizPreparationPolicy, type QuizPreparationRequest } from "./types.js";
+import { createEvidencePool } from "./evidence-pool.js";
+import { TRUSTED_SOURCE_DOMAINS } from "./evidence-policy.js";
+import type { GenerationGovernor } from "./governor.js";
+import { deepFreeze } from "./deep-freeze.js";
+import { addModelUsage, ZERO_MODEL_USAGE } from "./model-usage.js";
+import { selectPlayableCandidate, validateGeneratedCandidate } from "./quality.js";
+import { QuizModelFailure, QuizPreparationCancelledError, type ModelUsage, type PreparedQuiz, type QuizFallbackReason, type QuizModelPort, type QuizPreparation, type QuizPreparationPolicy, type QuizPreparationRequest } from "./types.js";
 
 const MODEL = "gpt-5.4-mini-2026-03-17" as const;
 const PROMPT_VERSION = "quiz-v1" as const;
-const MAX_SEARCH_CALLS_PER_DISCOVERY = 1;
-const ZERO_USAGE: ModelUsage = { inputTokens: 0, outputTokens: 0, searchCalls: 0 };
 
 interface Dependencies {
   readonly governor: GenerationGovernor;
@@ -16,32 +18,10 @@ interface Dependencies {
   readonly policy: QuizPreparationPolicy;
 }
 
-interface EvidenceFlight {
-  readonly controller: AbortController;
-  readonly promise: Promise<ModelEvidence>;
-  settled: boolean;
-  subscribers: number;
-}
-
-class EvidenceBudgetExhaustedError extends Error {}
-
-class EvidenceLookupError extends Error {
-  constructor(readonly usage: ModelUsage, cause: unknown) {
-    super("evidence lookup failed", { cause });
-  }
-}
-
-function frozen<T>(value: T): T {
-  if (typeof value !== "object" || value === null || Object.isFrozen(value)) return value;
-  Object.freeze(value);
-  for (const child of Object.values(value)) frozen(child);
-  return value;
-}
-
-function fallback(now: number, reason: QuizFallbackReason, usage: ModelUsage = ZERO_USAGE): PreparedQuiz {
+function fallback(now: number, reason: QuizFallbackReason, usage: ModelUsage = ZERO_MODEL_USAGE): PreparedQuiz {
   const validation = validateQuizTemplate(GENERAL_KNOWLEDGE_FALLBACK_V1);
   if (!validation.ok) throw new TypeError(`Invalid curated fallback: ${validation.reason}`);
-  return frozen({
+  return deepFreeze({
     provenance: { fallbackReason: reason, generatedAt: now, model: MODEL, promptVersion: PROMPT_VERSION, usage },
     source: "fallback",
     sources: [],
@@ -53,38 +33,20 @@ function normalizedFailure(error: unknown): QuizFallbackReason {
   return error instanceof QuizModelFailure ? error.reason : "upstream_unavailable";
 }
 
-function addUsage(...values: readonly ModelUsage[]): ModelUsage {
-  return values.reduce<ModelUsage>((total, value) => ({
-    inputTokens: total.inputTokens + value.inputTokens,
-    outputTokens: total.outputTokens + value.outputTokens,
-    searchCalls: total.searchCalls + value.searchCalls
-  }), ZERO_USAGE);
-}
-
 function combinedSignal(external: AbortSignal, deadlineMs: number): { readonly clear: () => void; readonly signal: AbortSignal; readonly timedOut: () => boolean } {
   const deadline = new AbortController();
   const timer = setTimeout(() => deadline.abort(), deadlineMs);
   return { clear: () => clearTimeout(timer), signal: AbortSignal.any([external, deadline.signal]), timedOut: () => deadline.signal.aborted };
 }
 
-function evidenceCacheKey(request: QuizModelRequest, ttlMs: number): string {
-  return JSON.stringify({
-    bucket: Math.floor(request.now / ttlMs),
-    configuration: [
-      request.configuration.contentMode,
-      request.configuration.category,
-      request.configuration.difficultyProfile,
-      request.configuration.currentEventsLookbackDays
-    ],
+export function createQuizPreparation(dependencies: Dependencies): QuizPreparation {
+  const evidencePool = createEvidencePool({
+    maxEntries: dependencies.policy.evidenceCacheMaxEntries,
     model: MODEL,
     promptVersion: PROMPT_VERSION,
-    sourcePolicy: TRUSTED_SOURCE_DOMAINS
+    sourcePolicy: TRUSTED_SOURCE_DOMAINS,
+    ttlMs: dependencies.policy.evidenceCacheTtlMs
   });
-}
-
-export function createQuizPreparation(dependencies: Dependencies): QuizPreparation {
-  const evidenceCache = new Map<string, { readonly evidence: ModelEvidence; readonly expiresAt: number }>();
-  const evidenceFlights = new Map<string, EvidenceFlight>();
   let circuitOpenedUntil = 0;
   let consecutiveProviderFailures = 0;
   const failureThreshold = dependencies.policy.circuitFailureThreshold ?? 3;
@@ -92,90 +54,6 @@ export function createQuizPreparation(dependencies: Dependencies): QuizPreparati
   const providerFailed = (at: number): void => {
     consecutiveProviderFailures += 1;
     if (consecutiveProviderFailures >= failureThreshold) circuitOpenedUntil = at + circuitCooldownMs;
-  };
-
-  const storeEvidence = (key: string, evidence: ModelEvidence, now: number): void => {
-    const ttlMs = dependencies.policy.evidenceCacheTtlMs;
-    evidenceCache.set(key, {
-      evidence: frozen(evidence),
-      expiresAt: Math.min(now + ttlMs, (Math.floor(now / ttlMs) + 1) * ttlMs)
-    });
-    while (evidenceCache.size > dependencies.policy.evidenceCacheMaxEntries) {
-      const oldest = evidenceCache.keys().next().value;
-      if (oldest === undefined) break;
-      evidenceCache.delete(oldest);
-    }
-  };
-
-  const awaitFlight = async (flight: EvidenceFlight, signal: AbortSignal): Promise<ModelEvidence> => {
-    if (signal.aborted) throw signal.reason;
-    flight.subscribers += 1;
-    return new Promise<ModelEvidence>((resolve, reject) => {
-      let finished = false;
-      const cleanup = (): void => {
-        if (finished) return;
-        finished = true;
-        signal.removeEventListener("abort", aborted);
-        flight.subscribers -= 1;
-        if (flight.subscribers === 0 && !flight.settled) flight.controller.abort();
-      };
-      const aborted = (): void => {
-        cleanup();
-        reject(signal.reason);
-      };
-      signal.addEventListener("abort", aborted, { once: true });
-      void flight.promise.then(
-        (value) => { cleanup(); resolve(value); },
-        (error: unknown) => { cleanup(); reject(error); }
-      );
-    });
-  };
-
-  const acquireEvidence = async (model: QuizModelPort, request: QuizModelRequest, signal: AbortSignal, permit: GenerationPermit): Promise<{ readonly evidence: ModelEvidence; readonly usage: ModelUsage }> => {
-    const key = evidenceCacheKey(request, dependencies.policy.evidenceCacheTtlMs);
-    const cached = evidenceCache.get(key);
-    if (cached !== undefined && cached.expiresAt > request.now) {
-      evidenceCache.delete(key);
-      evidenceCache.set(key, cached);
-      return { evidence: cached.evidence, usage: ZERO_USAGE };
-    }
-    if (cached !== undefined) evidenceCache.delete(key);
-
-    let flight = evidenceFlights.get(key);
-    const ownsSearch = flight === undefined;
-    if (flight === undefined) {
-      if (!permit.reserveSearchCalls(MAX_SEARCH_CALLS_PER_DISCOVERY)) throw new EvidenceBudgetExhaustedError();
-      const controller = new AbortController();
-      const promise = model.discover(request, controller.signal).then((value) => {
-        storeEvidence(key, value, request.now);
-        return value;
-      });
-      const createdFlight: EvidenceFlight = {
-        controller,
-        promise,
-        settled: false,
-        subscribers: 0
-      };
-      const settle = (): void => {
-        createdFlight.settled = true;
-        if (evidenceFlights.get(key) === createdFlight) evidenceFlights.delete(key);
-      };
-      void promise.then(settle, settle);
-      evidenceFlights.set(key, createdFlight);
-      flight = createdFlight;
-    }
-
-    try {
-      const evidence = await awaitFlight(flight, signal);
-      return {
-        evidence,
-        usage: ownsSearch
-          ? { ...evidence.usage, searchCalls: Math.max(MAX_SEARCH_CALLS_PER_DISCOVERY, evidence.usage.searchCalls) }
-          : ZERO_USAGE
-      };
-    } catch (error) {
-      throw new EvidenceLookupError(ownsSearch ? { ...ZERO_USAGE, searchCalls: MAX_SEARCH_CALLS_PER_DISCOVERY } : ZERO_USAGE, error);
-    }
   };
 
   return {
@@ -191,28 +69,24 @@ export function createQuizPreparation(dependencies: Dependencies): QuizPreparati
       const deadline = combinedSignal(externalSignal, dependencies.policy.deadlineMs);
       const modelRequest = { configuration: request.configuration, now, roomId: request.roomId, roundId: request.roundId };
       try {
-        let evidence;
-        let evidenceUsage = ZERO_USAGE;
-        try {
-          const acquisition = await acquireEvidence(model, modelRequest, deadline.signal, permit);
-          evidence = acquisition.evidence;
-          evidenceUsage = acquisition.usage;
-        } catch (error) {
-          if (error instanceof EvidenceBudgetExhaustedError) return fallback(now, "budget_exhausted");
+        const acquisition = await evidencePool.acquire(model, modelRequest, deadline.signal, permit);
+        if (acquisition.status === "budget_exhausted") return fallback(now, "budget_exhausted");
+        if (acquisition.status === "failed") {
           if (externalSignal.aborted) throw new QuizPreparationCancelledError();
-          const usage = error instanceof EvidenceLookupError ? error.usage : ZERO_USAGE;
           if (deadline.timedOut()) {
             providerFailed(now);
-            return fallback(now, "timeout", usage);
+            return fallback(now, "timeout", acquisition.usage);
           }
           providerFailed(now);
-          return fallback(now, normalizedFailure(error instanceof EvidenceLookupError ? error.cause : error), usage);
+          return fallback(now, normalizedFailure(acquisition.cause), acquisition.usage);
         }
-        let candidate;
+        const evidence = acquisition.evidence;
+        const evidenceUsage = acquisition.usage;
+        let generation;
         let lastFailure: unknown;
         for (let attempt = 0; attempt <= dependencies.policy.retryLimit; attempt += 1) {
           try {
-            candidate = await model.generate(modelRequest, evidence, deadline.signal);
+            generation = await model.generate(modelRequest, evidence, deadline.signal);
             break;
           } catch (error) {
             lastFailure = error;
@@ -225,15 +99,16 @@ export function createQuizPreparation(dependencies: Dependencies): QuizPreparati
           providerFailed(now);
           return fallback(now, "timeout", evidenceUsage);
         }
-        if (candidate === undefined) {
+        if (generation === undefined) {
           providerFailed(now);
           return fallback(now, normalizedFailure(lastFailure), evidenceUsage);
         }
-        const generationUsage = addUsage(evidenceUsage, candidate.usage ?? ZERO_USAGE);
+        const candidate = generation.value;
+        const generationUsage = addModelUsage(evidenceUsage, generation.usage);
 
-        let review;
+        let reviewStage;
         try {
-          review = await model.review(candidate, modelRequest, deadline.signal);
+          reviewStage = await model.review(candidate, evidence, modelRequest, deadline.signal);
         } catch (error) {
           if (externalSignal.aborted) throw new QuizPreparationCancelledError();
           if (deadline.timedOut()) {
@@ -243,16 +118,17 @@ export function createQuizPreparation(dependencies: Dependencies): QuizPreparati
           providerFailed(now);
           return fallback(now, normalizedFailure(error), generationUsage);
         }
+        const review = reviewStage.value;
         const selection = selectPlayableCandidate(candidate, review, request.configuration);
-        const reviewUsage = review.usage === undefined ? ZERO_USAGE : { ...review.usage, searchCalls: 0 };
-        const totalUsage = addUsage(generationUsage, reviewUsage);
+        const reviewUsage = { ...reviewStage.usage, searchCalls: 0 };
+        const totalUsage = addModelUsage(generationUsage, reviewUsage);
         if (selection === undefined) return fallback(now, "validation_failed", totalUsage);
         const validated = validateGeneratedCandidate(selection.candidate, selection.review, request.configuration, now, dependencies.policy.developingStoryCutoffMs, `generated:${dependencies.id()}`);
         if (!validated.ok) return fallback(now, "validation_failed", totalUsage);
 
         consecutiveProviderFailures = 0;
 
-        return frozen({
+        return deepFreeze({
           provenance: {
             generatedAt: now,
             model: MODEL,

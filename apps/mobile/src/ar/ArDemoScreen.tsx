@@ -8,19 +8,13 @@ import { getCharacter, getCharacterColor } from "../features/characters/characte
 import type { WarRoomRealtimeClient } from "../features/warRoom/realtimeClient";
 import { SharedArenaScene } from "./scenes/SharedArenaScene";
 import type { ArFlowPhase, ArMarkerTrackingState, ArSceneBridge, ArTrackingState } from "./types";
+import { markerTrackingDecision } from "./markerTrackingPolicy";
 
 type ArDemoScreenProps = {
   client: WarRoomRealtimeClient;
   onBattleComplete: () => void;
   onExit: () => void;
   room: PublicRoomState;
-};
-
-const trackingCopy: Record<ArTrackingState, string> = {
-  initializing: "Starting camera…",
-  limited: "Move slowly and keep the printed marker visible",
-  normal: "Tracking stable",
-  unavailable: "Tracking unavailable",
 };
 
 export function ArDemoScreen({ client, onBattleComplete, onExit, room }: ArDemoScreenProps) {
@@ -30,7 +24,7 @@ export function ArDemoScreen({ client, onBattleComplete, onExit, room }: ArDemoS
   const [syncError, setSyncError] = useState<string | null>(null);
   const participants = Object.values(room.players);
   const readyParticipants = participants.filter((participant) => participant.ready && participant.positionLocked);
-  const markerFound = markerTracking === "tracked" || markerTracking === "degraded";
+  const markerDecision = markerTrackingDecision("organizer", markerTracking, trackingState);
 
   const sceneBridge = useMemo<ArSceneBridge>(
     () => ({
@@ -48,12 +42,12 @@ export function ArDemoScreen({ client, onBattleComplete, onExit, room }: ArDemoS
   }, [onBattleComplete, room.phase]);
 
   const openOrganizerLobby = async () => {
-    if (!markerFound) {
+    if (!markerDecision.markerFound) {
       return;
     }
     setSyncError(null);
     try {
-      await client.send({ radiusM: room.arena.radiusM, type: "configure_arena" });
+      await client.send("configure_arena", { radiusM: room.arena.radiusM });
       setPhase("organizer-lobby");
     } catch (error) {
       setSyncError(error instanceof Error ? error.message : String(error));
@@ -66,7 +60,7 @@ export function ArDemoScreen({ client, onBattleComplete, onExit, room }: ArDemoS
     }
     setSyncError(null);
     try {
-      await client.send({ type: "start_battle" });
+      await client.send("start_battle", {});
     } catch (error) {
       setSyncError(error instanceof Error ? error.message : String(error));
     }
@@ -109,13 +103,7 @@ export function ArDemoScreen({ client, onBattleComplete, onExit, room }: ArDemoS
             <Text numberOfLines={1} style={styles.statusText}>
               {phase === "organizer-lobby"
                 ? "Arena marker verified · realtime lobby"
-                : markerTracking === "tracked"
-                  ? "Arena marker locked"
-                  : markerTracking === "degraded"
-                    ? "Marker pose retained"
-                    : markerTracking === "lost"
-                      ? "Marker lost · scan again"
-                      : trackingCopy[trackingState]}
+                : markerDecision.label}
             </Text>
           </View>
           <View style={styles.phasePill}>
@@ -136,25 +124,25 @@ export function ArDemoScreen({ client, onBattleComplete, onExit, room }: ArDemoS
             <View style={styles.bottomPanel}>
               <Text style={styles.panelKicker}>Organizer setup</Text>
               <Text style={styles.panelTitle}>
-                {markerFound ? "Arena marker found" : "Scan the arena marker"}
+                {markerDecision.markerFound ? "Arena marker found" : "Scan the arena marker"}
               </Text>
               <Text style={styles.panelBody}>
-                {markerFound
+                {markerDecision.markerFound
                   ? "The printed marker now defines the shared origin and forward direction for every participant."
                   : "Place the bundled 180 mm marker flat at arena center, then move slowly until its full border is visible."}
               </Text>
               <Pressable
                 accessibilityRole="button"
-              disabled={!markerFound}
+              disabled={!markerDecision.markerFound}
                 onPress={() => void openOrganizerLobby()}
                 style={({ pressed }) => [
                   styles.continueButton,
-                !markerFound && styles.continueButtonDisabled,
-                pressed && markerFound && styles.controlPressed,
+                !markerDecision.markerFound && styles.continueButtonDisabled,
+                pressed && markerDecision.markerFound && styles.controlPressed,
                 ]}
               >
                 <Text style={styles.continueButtonText}>
-                {markerFound ? "Use marker and open lobby" : "Looking for marker…"}
+                {markerDecision.markerFound ? "Use marker and open lobby" : "Looking for marker…"}
                 </Text>
               </Pressable>
             </View>
@@ -309,7 +297,6 @@ const styles = StyleSheet.create({
   organizerBattleCopy: { flex: 1 },
   organizerBattleTitle: { color: colors.ink, fontSize: 18, fontWeight: "900", marginTop: 3 },
   organizerBattleDetail: { color: colors.inkMuted, fontSize: 12, marginTop: 3 },
-  endBattleButton: { alignItems: "center", borderColor: colors.danger, borderRadius: 12, borderWidth: 1, justifyContent: "center", minHeight: 48, paddingHorizontal: 14 },
   endBattleButtonText: { color: colors.ink, fontSize: 13, fontWeight: "800" },
   organizerRoster: { backgroundColor: colors.cameraScrim, gap: 8, margin: 14, padding: 16 },
   organizerRosterTitle: { color: colors.ink, fontSize: 16, fontWeight: "900", marginBottom: 2 },
