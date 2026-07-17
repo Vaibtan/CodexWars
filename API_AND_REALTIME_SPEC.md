@@ -793,8 +793,9 @@ Provider names, billing state, raw dependency messages, and stack traces never b
 The hosted pilot is nickname-only, so admission and model-backed preparation are explicitly bounded:
 
 - Trusted-proxy-normalized per-IP windows limit room creation, room-code joins, and rejected enumeration attempts.
-- One preparation runs per room; server-wide generation concurrency, daily generation/search budgets, provider token limits, hard timeouts, and at most one transient retry bound upstream cost.
-- Each round has a bounded regeneration allowance. Global budget/circuit-open outcomes select fallback without starting an upstream request.
+- One preparation runs per room; server-wide generation concurrency, daily generation/search budgets, provider token limits, and hard timeouts bound upstream cost. Equivalent preparations may reuse or coalesce a bounded process-local evidence lookup, but never a generated Quiz Template. At most one transient candidate-generation retry is allowed, and it reuses the same evidence without another hosted search.
+- Fresh evidence lookup reserves its maximum search charge before provider work. Cache/coalesced reuse records zero new searches, while discovery or later-stage failure retains the reserved search usage in private provenance and telemetry.
+- Each round has a bounded regeneration allowance. Exhausted generation budget and circuit-open outcomes select fallback without starting an upstream request. Exhausted search budget rejects a fresh evidence lookup but permits zero-search reuse of an unexpired cache entry while generation budget remains.
 - Organizer quiz input is allow-listed enums and small integers only; no free-form text is concatenated into privileged model instructions.
 - `quiz_answer`: one accepted answer and at most five malformed attempts per participant/question.
 - Localization, position, and readiness commands: maximum 5/s per client.

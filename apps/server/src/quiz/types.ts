@@ -38,6 +38,13 @@ export interface ModelUsage {
   readonly searchCalls: number;
 }
 
+export interface ModelEvidence {
+  readonly brief: string;
+  readonly retrievedAt: number;
+  readonly sources: readonly { readonly title?: string; readonly url: string }[];
+  readonly usage: ModelUsage;
+}
+
 export type QuizReviewIssueCode =
   | "ambiguous_answer"
   | "difficulty_mismatch"
@@ -81,7 +88,8 @@ export interface QuizModelRequest {
 }
 
 export interface QuizModelPort {
-  generate(request: QuizModelRequest, signal: AbortSignal): Promise<ModelQuizCandidate>;
+  discover(request: QuizModelRequest, signal: AbortSignal): Promise<ModelEvidence>;
+  generate(request: QuizModelRequest, evidence: ModelEvidence, signal: AbortSignal): Promise<ModelQuizCandidate>;
   review(candidate: ModelQuizCandidate, request: QuizModelRequest, signal: AbortSignal): Promise<ModelQuizReview>;
 }
 
@@ -116,5 +124,7 @@ export interface QuizPreparationPolicy {
   readonly circuitFailureThreshold?: number;
   readonly deadlineMs: number;
   readonly developingStoryCutoffMs: number;
+  readonly evidenceCacheMaxEntries: number;
+  readonly evidenceCacheTtlMs: number;
   readonly retryLimit: number;
 }

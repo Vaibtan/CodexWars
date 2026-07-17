@@ -24,6 +24,8 @@ export function createRuntimeQuizPreparation(config: ServerConfig, now: () => nu
       circuitFailureThreshold: config.generation.circuitFailureThreshold,
       deadlineMs: config.generation.timeoutMs,
       developingStoryCutoffMs: config.generation.developingStoryCutoffMs,
+      evidenceCacheMaxEntries: config.generation.evidenceCacheMaxEntries,
+      evidenceCacheTtlMs: config.generation.evidenceCacheTtlMs,
       retryLimit: config.generation.retryLimit
     }
   });

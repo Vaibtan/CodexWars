@@ -193,11 +193,26 @@ Public hosting makes room creation and model-backed generation a billable attack
 - [x] Redact quiz prompts, answers, sources, participant names, tokens, and coordinates from default operational logs.
 - [x] Define retryability and player-facing messages without exposing provider names, billing state, dependency messages, or stack traces.
 
+### Search reuse and retry accounting
+
+- [x] Keep full generated-quiz caching disabled so every preparation still performs its own candidate generation, independent review, validation, and template-ID assignment.
+- [x] Add a bounded, process-local evidence cache keyed by model snapshot, prompt version, trusted-source policy, quiz configuration, and a short UTC freshness bucket.
+- [x] Coalesce identical in-flight evidence lookups so concurrent rooms share one hosted web search without sharing generated questions or cancellation fate.
+- [x] Retry only transient candidate-generation failures. Reuse the acquired evidence and never repeat hosted web search as part of a candidate retry.
+- [x] Keep AI SDK retries disabled so the application owns the complete retry budget.
+- [x] Reserve the maximum permitted search charge before a fresh evidence lookup and retain that accounting when discovery or any later stage fails.
+- [x] Attribute cached and coalesced evidence reuse as zero new search calls while preserving the server-owned evidence and retrieval timestamp used for validation.
+- [x] Let zero-search cache reuse continue after the daily search quota is exhausted; reject only a fresh search reservation while the independent generation budget remains available.
+- [x] Keep the cache size, TTL, and candidate retry limit in validated server configuration; cache state remains process-local and is cleared by restart.
+
 ### Acceptance criteria
 
 - [x] An unauthenticated remote client cannot create unbounded OpenAI spend.
-- [x] Exhausted limits degrade to the bundled fallback rather than making the game unavailable.
+- [x] Exhausted generation limits degrade to the bundled fallback; exhausted search limits block fresh evidence lookup while allowing zero-search cache reuse.
 - [x] Cost and abuse controls have deterministic tests with no wall-clock sleeps or network calls.
+- [x] Two concurrent equivalent preparations perform one evidence discovery but produce independently validated Quiz Templates.
+- [x] A transient candidate failure retries candidate generation without a second evidence discovery.
+- [x] A failed fresh discovery and a failure after successful discovery both retain conservative search usage in fallback provenance and telemetry.
 
 ## PD-9: Configuration and operational readiness
 

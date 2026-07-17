@@ -59,8 +59,11 @@ describe(`real OpenAI quiz generation: ${liveCaseName}`, () => {
 
     let candidate: ModelQuizCandidate;
     let review: ModelQuizReview;
+    let evidenceUsage = { inputTokens: 0, outputTokens: 0, searchCalls: 0 };
     try {
-      candidate = await model.generate(request, AbortSignal.timeout(120_000));
+      const evidence = await model.discover(request, AbortSignal.timeout(120_000));
+      evidenceUsage = evidence.usage;
+      candidate = await model.generate(request, evidence, AbortSignal.timeout(120_000));
       review = await model.review(candidate, request, AbortSignal.timeout(30_000));
     } catch (error) {
       const provider = error instanceof QuizModelFailure && error.cause instanceof Error ? error.cause : error;
@@ -78,9 +81,9 @@ describe(`real OpenAI quiz generation: ${liveCaseName}`, () => {
       : validateGeneratedCandidate(selection.candidate, selection.review, request.configuration, now, 3_600_000, "generated:01JZ8V7Y8TQ5B7MT3Y94K6Y8V2");
 
     const usage = {
-      inputTokens: (candidate.usage?.inputTokens ?? 0) + (review.usage?.inputTokens ?? 0),
-      outputTokens: (candidate.usage?.outputTokens ?? 0) + (review.usage?.outputTokens ?? 0),
-      searchCalls: candidate.usage?.searchCalls ?? 0
+      inputTokens: evidenceUsage.inputTokens + (candidate.usage?.inputTokens ?? 0) + (review.usage?.inputTokens ?? 0),
+      outputTokens: evidenceUsage.outputTokens + (candidate.usage?.outputTokens ?? 0) + (review.usage?.outputTokens ?? 0),
+      searchCalls: evidenceUsage.searchCalls
     };
     const estimatedCostUsd = usage.inputTokens * 0.75 / 1_000_000
       + usage.outputTokens * 4.5 / 1_000_000

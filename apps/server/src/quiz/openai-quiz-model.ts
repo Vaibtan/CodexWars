@@ -4,7 +4,7 @@ import { z } from "zod";
 import { QUIZ } from "@codexwars/shared";
 import { createEvidenceCatalog, resolveEvidenceReferences, type EvidenceCatalog } from "./evidence-catalog.js";
 import { generatedQuestionKind, materializeGeneratedAnswer, TRUSTED_SOURCE_DOMAINS } from "./quality.js";
-import { QuizModelFailure, type ModelQuizCandidate, type ModelQuizReview, type QuizModelPort, type QuizModelRequest, type QuizReviewIssueCode } from "./types.js";
+import { QuizModelFailure, type ModelEvidence, type ModelQuizCandidate, type ModelQuizReview, type QuizModelPort, type QuizModelRequest, type QuizReviewIssueCode } from "./types.js";
 
 const MODEL = "gpt-5.4-mini-2026-03-17";
 const MODEL_QUESTION_COUNT = 16;
@@ -262,14 +262,29 @@ export function createOpenAIQuizModelPort(options: {
   const aiSdk = productionAiSdk(options.apiKey, maxWebSearchCalls, options.searchContextSize ?? "medium");
 
   return {
-    async generate(request, signal) {
+    async discover(request, signal): Promise<ModelEvidence> {
       try {
         const discovery = await providerStage("evidence", () => aiSdk.discover(evidencePrompt(request), signal));
         const catalog = createEvidenceCatalog(discovery.sources);
         if (discovery.searchCalls === 0 || discovery.brief.trim().length === 0 || catalog.entries.length === 0) {
           throw new QuizModelFailure("malformed_output", false, new Error(`evidence_catalog_empty sources=${catalog.entries.length} searchCalls=${discovery.searchCalls}`));
         }
-        const response = await providerStage("candidate", () => aiSdk.generate(generationPrompt(request, discovery.brief, catalog), signal));
+        return {
+          brief: discovery.brief,
+          retrievedAt: request.now,
+          sources: discovery.sources,
+          usage: { ...discovery.usage, searchCalls: discovery.searchCalls }
+        };
+      } catch (error) {
+        throw normalizedFailure(error);
+      }
+    },
+
+    async generate(request, evidence, signal) {
+      try {
+        const catalog = createEvidenceCatalog(evidence.sources);
+        if (catalog.entries.length === 0) throw new QuizModelFailure("malformed_output", false, new Error("evidence_catalog_empty"));
+        const response = await providerStage("candidate", () => aiSdk.generate(generationPrompt(request, evidence.brief, catalog), signal));
         const output = candidateSchema.parse(response.output);
         const catalogIds = new Set<string>(catalog.entries.map((entry) => entry.id));
         const references = output.questions.flatMap((question) => question.sources);
@@ -278,11 +293,11 @@ export function createOpenAIQuizModelPort(options: {
           throw new QuizModelFailure(
             "malformed_output",
             false,
-            new Error(`source_catalog_reference_mismatch catalogSources=${catalog.entries.length} references=${references.length} unknown=${unknownReferences} searchCalls=${discovery.searchCalls}`)
+            new Error(`source_catalog_reference_mismatch catalogSources=${catalog.entries.length} references=${references.length} unknown=${unknownReferences}`)
           );
         }
         const questions = output.questions.map((question, index) => {
-          const sources = resolveEvidenceReferences(catalog, question.sources, request.now);
+          const sources = resolveEvidenceReferences(catalog, question.sources, evidence.retrievedAt);
           if (sources === undefined) throw new QuizModelFailure("malformed_output", false);
           const { correctAnswer, distractors, ...draft } = question;
           return {
@@ -294,12 +309,12 @@ export function createOpenAIQuizModelPort(options: {
         });
         return {
           questions,
-          reviewContext: { evidenceBrief: discovery.brief },
+          reviewContext: { evidenceBrief: evidence.brief },
           title: output.title,
           usage: {
-            inputTokens: discovery.usage.inputTokens + response.usage.inputTokens,
-            outputTokens: discovery.usage.outputTokens + response.usage.outputTokens,
-            searchCalls: discovery.searchCalls
+            inputTokens: response.usage.inputTokens,
+            outputTokens: response.usage.outputTokens,
+            searchCalls: 0
           }
         };
       } catch (error) {

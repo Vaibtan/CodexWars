@@ -7,6 +7,7 @@ export { QUIZ_EVALUATION_THRESHOLDS, QUIZ_EVALUATION_V1, type QuizEvaluationCase
 export {
   QuizModelFailure,
   QuizPreparationCancelledError,
+  type ModelEvidence,
   type ModelEvidenceSource,
   type ModelQuizCandidate,
   type ModelQuizQuestion,

@@ -109,4 +109,6 @@ npm run test:openai-live
 
 The live command fails when the key is absent; it is never reported as a skipped or mocked provider pass.
 
+Quiz preparation does not cache generated quizzes. It keeps at most 64 evidence entries for a default 15-minute UTC freshness bucket and coalesces equivalent in-flight evidence lookups. Configure these process-local limits with `QUIZ_EVIDENCE_CACHE_MAX_ENTRIES` and `QUIZ_EVIDENCE_CACHE_TTL_MS`; restart clears the cache.
+
 For AR validation, print the [A4 arena marker](output/pdf/codexwars-arena-marker-a4.pdf) at 100% / Actual size and verify its black square is 180 mm wide. For device setup guidance, see [docs/PLATFORM_TESTING.md](docs/PLATFORM_TESTING.md).

@@ -103,6 +103,8 @@ flowchart TB
 
 `WarRoom` depends only on the `QuizPreparation.prepare(request, signal)` interface. Provider types, web-search orchestration, retries, evidence policy, review, budgets, and fallback selection remain inside `apps/server/src/quiz/`. `QuizRun` consumes an immutable validated `QuizTemplate` and performs no external calls. Dependency direction remains downward into `shared`; `shared` imports nothing from `apps`.
 
+`QuizPreparation` keeps a bounded process-local evidence cache, not a generated-quiz cache. The cache key includes the locked model and prompt versions, trusted-source policy, bounded quiz configuration, and a short UTC freshness bucket. Equivalent concurrent preparations share one cancellable evidence lookup; each preparation still performs its own candidate generation, independent review, validation, and template-ID assignment. Only transient candidate generation is retried, using the same evidence. Search budget is reserved before a fresh lookup, so a failed discovery or later-stage failure cannot erase the potential search charge from operational usage. Exhausting the search quota blocks new searches but not zero-search cache reuse; the independent generation budget still applies.
+
 ---
 
 ## 4. Runtime sequences
@@ -121,9 +123,16 @@ sequenceDiagram
     ROOM-->>ORG: command_accepted
     ROOM->>PREP: prepare(request, AbortSignal)
     alt generation enabled and budget available
-        PREP->>MODEL: discover grounded evidence with web search
-        MODEL-->>PREP: evidence brief + provider sources
+        alt fresh or coalesced evidence available
+            PREP->>PREP: reuse server-owned evidence with zero new search calls
+        else fresh lookup required
+            PREP->>MODEL: discover grounded evidence with one reserved web search
+            MODEL-->>PREP: evidence brief + provider sources
+        end
         PREP->>MODEL: generate bounded candidate buffer using source IDs
+        opt transient candidate failure
+            PREP->>MODEL: retry candidate generation with the same evidence
+        end
         MODEL-->>PREP: structured candidates
         PREP->>MODEL: structured semantic review
         MODEL-->>PREP: per-question review results

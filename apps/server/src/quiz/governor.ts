@@ -7,7 +7,7 @@ export interface GenerationGovernorOptions {
 }
 
 export interface GenerationPermit {
-  recordSearchCalls(count: number): boolean;
+  reserveSearchCalls(count: number): boolean;
   release(): void;
 }
 
@@ -29,13 +29,13 @@ export function createGenerationGovernor(options: GenerationGovernorOptions): Ge
         generations = 0;
         searchCalls = 0;
       }
-      if (active >= options.maxConcurrent || generations >= options.dailyGenerationLimit || searchCalls >= options.dailySearchLimit) return undefined;
+      if (active >= options.maxConcurrent || generations >= options.dailyGenerationLimit) return undefined;
 
       active += 1;
       generations += 1;
       let released = false;
       return {
-        recordSearchCalls(count) {
+        reserveSearchCalls(count) {
           if (!Number.isInteger(count) || count < 0 || searchCalls + count > options.dailySearchLimit) return false;
           searchCalls += count;
           return true;

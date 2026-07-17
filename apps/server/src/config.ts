@@ -18,6 +18,8 @@ export interface ServerConfig {
     readonly dailySearchLimit: number;
     readonly developingStoryCutoffMs: number;
     readonly enabled: boolean;
+    readonly evidenceCacheMaxEntries: number;
+    readonly evidenceCacheTtlMs: number;
     readonly maxConcurrent: number;
     readonly maxRegenerationsPerRound: number;
     readonly model: typeof LOCKED_MODEL;
@@ -29,11 +31,13 @@ export interface ServerConfig {
 
 type Environment = Readonly<Record<string, string | undefined>>;
 
-function integer(env: Environment, name: string, fallback: number, minimum: number): number {
+function integer(env: Environment, name: string, fallback: number, minimum: number, maximum = Number.MAX_SAFE_INTEGER): number {
   const raw = env[name];
   if (raw === undefined) return fallback;
   const parsed = Number(raw);
-  if (!Number.isSafeInteger(parsed) || parsed < minimum) throw new TypeError(`${name} must be an integer >= ${minimum}`);
+  if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) {
+    throw new TypeError(`${name} must be an integer from ${minimum} to ${maximum}`);
+  }
   return parsed;
 }
 
@@ -66,11 +70,13 @@ export function loadServerConfig(env: Environment): ServerConfig {
       dailySearchLimit: integer(env, "QUIZ_DAILY_SEARCH_LIMIT", 2_000, 0),
       developingStoryCutoffMs: integer(env, "QUIZ_DEVELOPING_STORY_CUTOFF_MS", 3_600_000, 1),
       enabled,
+      evidenceCacheMaxEntries: integer(env, "QUIZ_EVIDENCE_CACHE_MAX_ENTRIES", 64, 1, 1_024),
+      evidenceCacheTtlMs: integer(env, "QUIZ_EVIDENCE_CACHE_TTL_MS", 900_000, 1, 86_400_000),
       maxConcurrent: integer(env, "QUIZ_MAX_CONCURRENT_GENERATIONS", 2, 1),
       maxRegenerationsPerRound: integer(env, "QUIZ_MAX_REGENERATIONS_PER_ROUND", 2, 0),
       model: LOCKED_MODEL,
       ...(openaiApiKey === undefined ? {} : { openaiApiKey }),
-      retryLimit: integer(env, "QUIZ_GENERATION_RETRY_LIMIT", 1, 0),
+      retryLimit: integer(env, "QUIZ_GENERATION_RETRY_LIMIT", 1, 0, 1),
       timeoutMs: integer(env, "QUIZ_PREPARATION_TIMEOUT_MS", 20_000, 1)
     },
     port: integer(env, "PORT", 4000, 1),
