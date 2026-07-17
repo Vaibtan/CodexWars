@@ -36,7 +36,7 @@ The hackathon demo targets 3–4 physical devices, while the room model supports
 
 ## Delivery status
 
-The authoritative Colyseus backend, mobile realtime adapter, shared marker-space conversion, retained Viro scene, bundled character catalog, Android bundle, and ARM64 development APK build are implemented. P0 combat presentation still needs authoritative projectile/hit feedback, sound or haptics, and the eliminated-player overlay. Physical Android/iPhone M0 measurements and the complete mixed-platform M1 rehearsal are also open; see [`M0_RESULTS.md`](M0_RESULTS.md). A successful build does not prove shared physical alignment or complete the M1 experience.
+The authoritative Colyseus backend, mobile realtime adapter, shared marker-space conversion, retained Viro scene, bundled character catalog, Android bundle, and ARM64 development APK build are implemented. Combat presentation still needs authoritative projectile/hit feedback, sound or haptics, and the eliminated-player overlay. Physical Android/iPhone marker measurements and the complete mixed-platform rehearsal are also open; see [`M0_RESULTS.md`](M0_RESULTS.md). A successful build does not prove shared physical alignment or complete the end-to-end experience.
 
 ## Team
 
@@ -60,6 +60,14 @@ We began by turning the idea into Markdown documents and prompts, including the 
 - Colyseus 0.17 for the authoritative in-memory War Room and session authentication
 - OpenAI Responses API through the server-only Vercel AI SDK adapter for optional quiz preparation
 
+## Architecture
+
+The Expo/Viro mobile clients perform local marker tracking and rendering, while the Colyseus server owns admission, sessions, quiz progression, positioning, combat, reconnect behavior, and results. Shared runtime contracts and pure gameplay rules keep both sides aligned without giving the client authority over game outcomes.
+
+![CodexWars high-level system design](docs/architecture/codexwars-system-design.png)
+
+The editable source is available in [`docs/architecture/codexwars-system-design.excalidraw`](docs/architecture/codexwars-system-design.excalidraw).
+
 ## Specification map
 
 Each decision has one authoritative home:
@@ -69,8 +77,10 @@ Each decision has one authoritative home:
 | [`PRD.md`](PRD.md) | Product outcomes, roles, game rules, scope, and acceptance criteria |
 | [`BUILD_SPEC.md`](BUILD_SPEC.md) | Pinned stack, development environment, repository shape, and milestone order |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Component boundaries, runtime flows, state ownership, and invariants |
+| [`docs/architecture/codexwars-system-design.excalidraw`](docs/architecture/codexwars-system-design.excalidraw) | Editable high-level system design and trust-boundary diagram |
 | [`API_AND_REALTIME_SPEC.md`](API_AND_REALTIME_SPEC.md) | Exact P0 admission, synchronized state, commands, events, errors, and reconnect contract |
 | [`docs/AR_IMPLEMENTATION_SPEC.md`](docs/AR_IMPLEMENTATION_SPEC.md) | Marker/pose adapter and GLB rendering/asset contract |
+| [`docs/LOCAL_SETUP.md`](docs/LOCAL_SETUP.md) | Fresh-machine setup, native development builds, local multiplayer launch, and troubleshooting |
 | [`CONTEXT.md`](CONTEXT.md) | Canonical domain terms used by the specifications and code |
 | [`M0_RESULTS.md`](M0_RESULTS.md) | Physical marker-colocation acceptance results and remaining measurements |
 
@@ -90,16 +100,26 @@ assets/         Optimized runtime 3D assets
 
 ## Getting started
 
-Use Node.js 22.23.1:
+Use Node.js 22.23.1 and install the workspace from the repository root:
 
 ```bash
-npm install
+nvm use
+npm ci
+```
+
+Set `EXPO_PUBLIC_REALTIME_SERVER_URL` in `apps/mobile/.env` to an address that the test devices can reach. Then start the backend:
+
+```bash
 npm run server
-# In a second terminal:
+```
+
+In a second terminal, start Metro for the installed CodexWars development client:
+
+```bash
 npm run mobile
 ```
 
-Expo SDK 54 is an intentional compatibility pin for the currently available Expo Go client on the team's phones. The AR experience itself uses native modules and therefore still requires a development build.
+Expo SDK 54 is an intentional project pin. Expo Go cannot load the Viro native AR module; install a CodexWars development build before starting Metro. The complete Android, iPhone, environment, networking, and multiplayer instructions are in [`docs/LOCAL_SETUP.md`](docs/LOCAL_SETUP.md).
 
 The default test suite validates CodexWars-owned logic without pretending to validate OpenAI. To run the real generation, review, validation, and template-freeze acceptance path, provide `OPENAI_API_KEY` to the server process and run:
 
